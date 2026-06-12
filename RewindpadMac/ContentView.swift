@@ -408,31 +408,23 @@ struct AppGroupsManagementView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Workspaces")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            Text("·").foregroundStyle(.tertiary).font(.system(size: 13))
-                            Text("\(server.appGroups.count)")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.tertiary)
+                        HStack(alignment: .bottom) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Workspaces")
+                                    .font(.title.weight(.bold))
+                                Text("Launch groups of apps with one click.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer()
                             Button {
                                 editingGroup = nil
                                 showCreator = true
                             } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 11, weight: .semibold))
-                                    Text("New Workspace")
-                                        .font(.system(size: 12, weight: .semibold))
-                                }
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(Color.accentColor, in: Capsule())
+                                Label("New Workspace", systemImage: "plus")
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 22)
@@ -440,7 +432,12 @@ struct AppGroupsManagementView: View {
 
                         LazyVGrid(columns: columns, spacing: 14) {
                             ForEach(server.appGroups) { group in
-                                AppGroupCard(group: group) {
+                                let entries = group.apps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }
+                                let screen = NSScreen.screens.first
+                                let hasConflict = screen.map { server.conflictPair(entries: entries, layout: group.layout, screen: $0) != nil } ?? false
+                                AppGroupCard(group: group, hasConflict: hasConflict, onLaunch: {
+                                    server.launchAppGroup(id: group.id)
+                                }) {
                                     editingGroup = group
                                     showCreator = true
                                 } onDelete: {
@@ -508,6 +505,8 @@ struct AppGroupsManagementView: View {
 
 struct AppGroupCard: View {
     let group: AppGroup
+    let hasConflict: Bool
+    let onLaunch: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
 
@@ -537,27 +536,30 @@ struct AppGroupCard: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if isHovered {
-                    HStack(spacing: 6) {
-                        Button(action: onEdit) {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 11, weight: .medium))
-                                .frame(width: 26, height: 26)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Edit")
-                        Button { showDeleteConfirm = true } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.red)
-                                .frame(width: 26, height: 26)
-                                .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Delete")
+                HStack(spacing: 8) {
+                    if hasConflict {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(nsColor: .systemOrange))
+                            .help("Window sizes conflict — edit to fix")
                     }
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    if let label = group.hotkeyLabel {
+                        Text(label)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
+                    }
+                    Button(action: onLaunch) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 28, height: 28)
+                            .background(hasConflict ? Color.secondary.opacity(0.35) : Color.accentColor, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(hasConflict)
+                    .help(hasConflict ? "Fix the window size conflict before launching" : "Launch Workspace")
                 }
             }
             .padding(.horizontal, 12)
@@ -573,7 +575,7 @@ struct AppGroupCard: View {
         .scaleEffect(isHovered ? 1.012 : 1.0)
         .animation(.spring(response: 0.22, dampingFraction: 0.82), value: isHovered)
         .onHover { isHovered = $0 }
-        .onTapGesture(count: 2, perform: onEdit)
+        .onTapGesture(perform: onEdit)
         .contextMenu {
             Button("Edit Workspace", action: onEdit)
             Divider()
@@ -752,20 +754,6 @@ struct AppGroupLayoutPreview: View {
                 .animation(.spring(response: 0.35, dampingFraction: 0.8), value: entry.id)
             }
 
-            // Primary indicator dot
-            if isPrimary {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Circle()
-                            .fill(Color.accentColor)
-                            .frame(width: 7, height: 7)
-                            .shadow(color: Color.accentColor.opacity(0.85), radius: 4)
-                            .padding(6)
-                    }
-                    Spacer()
-                }
-            }
         }
         .frame(width: frame.width, height: frame.height)
         .position(x: frame.midX + (collide ? dx : 0), y: frame.midY + (collide ? dy : 0))
@@ -877,6 +865,33 @@ struct FlowRow<Content: View>: View {
     }
 }
 
+struct ChipFlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let w = proposal.width ?? 0
+        var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0
+        for sv in subviews {
+            let s = sv.sizeThatFits(.unspecified)
+            if x + s.width > w, x > 0 { x = 0; y += rowH + spacing; rowH = 0 }
+            x += s.width + spacing
+            rowH = max(rowH, s.height)
+        }
+        return CGSize(width: w, height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        var x = bounds.minX, y = bounds.minY, rowH: CGFloat = 0
+        for sv in subviews {
+            let s = sv.sizeThatFits(.unspecified)
+            if x + s.width > bounds.maxX, x > bounds.minX { x = bounds.minX; y += rowH + spacing; rowH = 0 }
+            sv.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
+            x += s.width + spacing
+            rowH = max(rowH, s.height)
+        }
+    }
+}
+
 // MARK: - Workspace Creator Sheet
 // MARK: - Workspace Creator Sheet
 
@@ -899,12 +914,14 @@ struct AppGroupCreatorSheet: View {
     @State private var shortcutSearchText = ""
     @State private var showDeleteConfirm = false
     @State private var currentStep: Int = 0
+    @State private var stepForward: Bool = true
     @State private var appsTab: Int = 0
+    @State private var cachedSortedApps: [AvailableApp] = []
     @Environment(\.dismiss) private var dismiss
 
     // 5 steps matching iPhone app
     private let stepTitles    = ["Name", "Layout", "Apps", "Order", "Settings"]
-    private let stepHeadings  = ["Name your Workspace", "Choose a layout", "Add apps", "Set the window order", "Final settings"]
+    private let stepHeadings  = ["Name your Workspace", "Choose your layout", "Add your apps", "Set your window order", "Finish your Workspace"]
     private let stepSubtitles = [
         "Give this environment a clear, memorable name.",
         "Pick how your windows will be arranged on screen.",
@@ -929,9 +946,8 @@ struct AppGroupCreatorSheet: View {
 
     private var filteredApps: [AvailableApp] {
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let all = server.availableApps.sorted { $0.name < $1.name }
-        guard !q.isEmpty else { return all }
-        return all.filter { $0.name.lowercased().contains(q) }
+        guard !q.isEmpty else { return cachedSortedApps }
+        return cachedSortedApps.filter { $0.name.lowercased().contains(q) }
     }
 
     private var previewGroup: AppGroup {
@@ -943,7 +959,7 @@ struct AppGroupCreatorSheet: View {
     }
 
     private var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !selectedApps.isEmpty
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !selectedApps.isEmpty && hardConflict == nil
     }
 
     private var hardConflict: (String, String)? {
@@ -956,128 +972,96 @@ struct AppGroupCreatorSheet: View {
     private var canAdvance: Bool {
         switch currentStep {
         case 0: return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case 1, 2: return hardConflict == nil
         default: return true
         }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // ── Dark glass header preview ─────────────────────────────────
-            headerPreview
+        HStack(spacing: 0) {
+            // ── Left — wizard steps ───────────────────────────────────────
+            VStack(spacing: 0) {
+                progressBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 14)
 
-            // ── Step progress ─────────────────────────────────────────────
-            progressBar
-                .padding(.horizontal, 20)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
+                Divider()
 
-            Divider().padding(.top, 12)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Title block — macOS text styles
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(stepHeadings[currentStep])
+                                .font(.title2.weight(.semibold))
+                            Text(stepSubtitles[currentStep])
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.bottom, 20)
 
-            // ── Step content ──────────────────────────────────────────────
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Title block
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(stepHeadings[currentStep])
-                            .font(.system(size: 22, weight: .bold))
-                        Text(stepSubtitles[currentStep])
-                            .font(.system(size: 15))
-                            .foregroundStyle(.secondary)
+                        // Step body
+                        stepContent
                     }
-                    .padding(.bottom, 24)
-
-                    // Step body
-                    stepContent
+                    .padding(24)
+                    .id(currentStep)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: stepForward ? .trailing : .leading).combined(with: .opacity),
+                        removal:   .move(edge: stepForward ? .leading  : .trailing).combined(with: .opacity)
+                    ))
                 }
-                .padding(24)
+
+                Divider()
+
+                navigationFooter
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
             }
+            .frame(width: 520)
+            .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
 
-            // ── Navigation footer ─────────────────────────────────────────
-            navigationFooter
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+            // ── Right — live preview ──────────────────────────────────────
+            previewPane
+                .frame(width: 340)
         }
-        .frame(width: 520, height: 700)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(width: 860, height: 720)
+        .task {
+            guard cachedSortedApps.isEmpty else { return }
+            let sorted = await Task.detached(priority: .userInitiated) {
+                server.availableApps.sorted { $0.name < $1.name }
+            }.value
+            cachedSortedApps = sorted
+        }
     }
 
-    // MARK: - Header
+    // MARK: - Preview pane
 
-    private var headerPreview: some View {
+    private var previewPane: some View {
         ZStack(alignment: .bottomLeading) {
-            AppGroupLayoutPreview(group: previewGroup, conflicting: hardConflict != nil)
-                .frame(maxWidth: .infinity)
-                .frame(height: 220)
-                .clipShape(UnevenRoundedRectangle(
-                    topLeadingRadius: 16, bottomLeadingRadius: 0,
-                    bottomTrailingRadius: 0, topTrailingRadius: 16, style: .continuous))
+            AppGroupLayoutPreview(group: previewGroup, conflicting: hardConflict != nil && currentStep == 1)
 
             // Vignette gradient for name legibility
             LinearGradient(
                 stops: [
-                    .init(color: .black.opacity(0.0), location: 0.3),
-                    .init(color: .black.opacity(0.65), location: 1.0)
+                    .init(color: .black.opacity(0.0), location: 0.6),
+                    .init(color: .black.opacity(0.55), location: 1.0)
                 ],
                 startPoint: .top, endPoint: .bottom
             )
-            .frame(maxWidth: .infinity)
-            .frame(height: 220)
             .allowsHitTesting(false)
-            .clipShape(UnevenRoundedRectangle(
-                topLeadingRadius: 16, bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0, topTrailingRadius: 16, style: .continuous))
 
             // Workspace name — animates as user types
             Text(name.isEmpty ? "My Workspace" : name)
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
                 .lineLimit(1)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 18)
                 .animation(.spring(response: 0.25, dampingFraction: 0.85), value: name)
-
-            // Top controls
-            VStack(spacing: 0) {
-                HStack {
-                    if existing != nil, let onDelete {
-                        Button { showDeleteConfirm = true } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 32, height: 32)
-                                .background(.white.opacity(0.18), in: Circle())
-                                .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 14)
-                        .confirmationDialog("Delete \"\(name.isEmpty ? "this workspace" : name)\"?",
-                                            isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                            Button("Delete Workspace", role: .destructive) { dismiss(); onDelete() }
-                            Button("Cancel", role: .cancel) {}
-                        } message: { Text("This cannot be undone.") }
-                    }
-                    Spacer()
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 32, height: 32)
-                            .background(.white.opacity(0.18), in: Circle())
-                            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.cancelAction)
-                    .padding(.trailing, 14)
-                }
-                .padding(.top, 14)
-                Spacer()
-            }
         }
-        .frame(height: 220)
     }
 
     // MARK: - Progress bar
@@ -1167,24 +1151,15 @@ struct AppGroupCreatorSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
 
             if let (a, b) = hardConflict {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .font(.system(size: 15))
-                        .padding(.top, 1)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("These apps can't share this screen")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.red)
-                        Text("\(a) and \(b) need more space than your screen has. Pick a different layout or apps.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.red.opacity(0.75))
-                    }
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                    Text("\(a) and \(b) can't fit on this screen together. Choose a different layout or remove an app.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.red.opacity(0.18), lineWidth: 0.5))
+                .transition(.opacity)
             }
         }
     }
@@ -1199,11 +1174,11 @@ struct AppGroupCreatorSheet: View {
     private func layoutCard(_ opt: AppGroupLayout) -> some View {
         let selected = layout == opt
         return Button { withAnimation(.easeInOut(duration: 0.12)) { layout = opt } } label: {
-            LayoutIconView(layout: opt, size: 34, color: selected ? .white : Color.accentColor, cornerRadius: 2.5)
-                .frame(width: 64, height: 56)
+            LayoutIconView(layout: opt, size: 26, color: selected ? .white : Color.accentColor, cornerRadius: 2)
+                .frame(width: 52, height: 44)
                 .background(selected ? Color.accentColor : Color.accentColor.opacity(0.10),
-                            in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
+                            in: RoundedRectangle(cornerRadius: 11))
+                .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(
                     selected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: selected ? 0 : 1))
                 .scaleEffect(selected ? 1.04 : 1.0)
                 .animation(.spring(response: 0.2, dampingFraction: 0.7), value: selected)
@@ -1215,64 +1190,40 @@ struct AppGroupCreatorSheet: View {
     // Step 2 — Apps (tabbed)
     private var stepApps: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // ── Added strip ──────────────────────────────────────────────
+            // ── Added chips (wrapping) ───────────────────────────────────
             if !selectedApps.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(selectedApps) { entry in
-                            Button {
-                                withAnimation(.spring(response: 0.25)) {
-                                    selectedApps.removeAll { $0.id == entry.id }
-                                    if primaryAppID == entry.id { primaryAppID = selectedApps.first?.id }
-                                }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    AppGroupAppIcon(path: entry.path, name: entry.appName)
-                                        .frame(width: 20, height: 20)
-                                    Text(entry.appName).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-                                }
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Color.accentColor.opacity(0.10), in: Capsule())
-                                .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.5))
+                ChipFlowLayout(spacing: 6) {
+                    ForEach(selectedApps) { entry in
+                        Button {
+                            withAnimation(.spring(response: 0.25)) {
+                                selectedApps.removeAll { $0.id == entry.id }
+                                if primaryAppID == entry.id { primaryAppID = selectedApps.first?.id }
                             }
-                            .buttonStyle(.plain)
-                            .transition(.scale(scale: 0.85).combined(with: .opacity))
+                        } label: {
+                            HStack(spacing: 5) {
+                                AppGroupAppIcon(path: entry.path, name: entry.appName, size: 18)
+                                Text(entry.appName).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(Color.accentColor.opacity(0.10), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.5))
                         }
+                        .buttonStyle(.plain)
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
                     }
-                    .padding(.horizontal, 2)
                 }
-                .frame(height: 36)
             }
 
-            // ── Apple-style tab selector ─────────────────────────────────
-            HStack(spacing: 0) {
-                ForEach(["Apps", "Links", "Shortcuts"].indices, id: \.self) { i in
-                    Button {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) { appsTab = i }
-                    } label: {
-                        Text(["Apps", "Links", "Shortcuts"][i])
-                            .font(.system(size: 14, weight: appsTab == i ? .semibold : .regular))
-                            .foregroundStyle(appsTab == i ? .primary : .secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                    }
-                    .buttonStyle(.plain)
-                }
+            // ── Native segmented tab selector ────────────────────────────
+            Picker("", selection: $appsTab) {
+                Text("Apps").tag(0)
+                Text("Links").tag(1)
+                Text("Shortcuts").tag(2)
             }
-            .background(
-                GeometryReader { g in
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                        .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
-                        .frame(width: g.size.width / 3)
-                        .offset(x: g.size.width / 3 * CGFloat(appsTab))
-                        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: appsTab)
-                    , alignment: .leading
-                }
-                .padding(3)
-            )
-            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
             .padding(.bottom, 4)
 
             // ── Tab content ──────────────────────────────────────────────
@@ -1290,29 +1241,30 @@ struct AppGroupCreatorSheet: View {
     private var appsGridTab: some View {
         VStack(spacing: 10) {
             // Search field
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                    .font(.system(size: 14))
-                TextField("Search apps…", text: $searchText)
-                    .font(.system(size: 15))
+                    .font(.system(size: 12))
+                TextField("Search", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
-                            .font(.system(size: 14))
+                            .font(.system(size: 12))
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
             // Icon grid
             ScrollView {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 88, maximum: 100), spacing: 6)],
-                    spacing: 10
+                    columns: [GridItem(.adaptive(minimum: 106, maximum: 124), spacing: 4)],
+                    spacing: 8
                 ) {
                     ForEach(filteredApps.prefix(120)) { app in
                         appIconCell(app)
@@ -1320,7 +1272,7 @@ struct AppGroupCreatorSheet: View {
                 }
                 .padding(.vertical, 4)
             }
-            .frame(height: 280)
+            .frame(height: 300)
         }
     }
 
@@ -1340,35 +1292,33 @@ struct AppGroupCreatorSheet: View {
         } label: {
             VStack(spacing: 6) {
                 ZStack(alignment: .topTrailing) {
-                    AppGroupAppIcon(path: app.path, name: app.name)
-                        .frame(width: 52, height: 52)
-                        .scaleEffect(added ? 0.92 : 1.0)
+                    AppGroupAppIcon(path: app.path, name: app.name, size: 68)
+                        .scaleEffect(added ? 0.90 : 1.0)
                         .animation(.spring(response: 0.2), value: added)
 
                     if added {
                         ZStack {
-                            Circle().fill(Color.accentColor).frame(width: 19, height: 19)
+                            Circle().fill(Color.accentColor).frame(width: 20, height: 20)
                             Image(systemName: "checkmark")
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(.white)
                         }
-                        .shadow(color: Color.accentColor.opacity(0.5), radius: 3)
-                        .offset(x: 5, y: -5)
+                        .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                        .offset(x: 6, y: -6)
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
                 }
                 Text(app.name)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(added ? Color.accentColor : .primary)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .animation(.easeInOut(duration: 0.15), value: added)
             }
-            .frame(width: 86)
+            .frame(width: 104)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(added ? Color.accentColor.opacity(0.10) : Color.clear)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(added ? Color.primary.opacity(0.06) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -1430,17 +1380,19 @@ struct AppGroupCreatorSheet: View {
                 .padding(16).frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
             } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 14))
-                    TextField("Search shortcuts…", text: $shortcutSearchText).font(.system(size: 15))
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.system(size: 12))
+                    TextField("Search", text: $shortcutSearchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
                     if !shortcutSearchText.isEmpty {
                         Button { shortcutSearchText = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).font(.system(size: 14))
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).font(.system(size: 12))
                         }.buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 9)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
                 let fsc: [AppleShortcut] = {
                     let q = shortcutSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1476,15 +1428,15 @@ struct AppGroupCreatorSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
             } else {
-                VStack(spacing: 0) {
+                List {
                     ForEach(Array(visible.enumerated()), id: \.element) { rank, srcIdx in
                         let entry = selectedApps[srcIdx]
                         let isPrimary = entry.id == primaryAppID
                         HStack(spacing: 14) {
                             Image(systemName: "line.3.horizontal")
-                                .font(.system(size: 14, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.tertiary)
-                                .frame(width: 20)
+                                .frame(width: 16)
                             ZStack {
                                 Circle()
                                     .fill(isPrimary ? Color.accentColor : Color.primary.opacity(0.12))
@@ -1511,23 +1463,28 @@ struct AppGroupCreatorSheet: View {
                                     .background(Color.accentColor, in: Capsule())
                             }
                         }
-                        .padding(.horizontal, 16).padding(.vertical, 13)
-                        .background(isPrimary ? Color.accentColor.opacity(0.07) : Color.clear)
+                        .padding(.vertical, 4)
                         .contentShape(Rectangle())
                         .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { primaryAppID = entry.id } }
-
-                        if rank < visible.count - 1 {
-                            Divider().padding(.leading, 74)
-                        }
+                        .listRowBackground(isPrimary ? Color.accentColor.opacity(0.07) : Color(nsColor: .windowBackgroundColor))
+                        .listRowSeparatorTint(Color.primary.opacity(0.07))
+                    }
+                    .onMove { from, to in
+                        var visibleApps = visible.map { selectedApps[$0] }
+                        visibleApps.move(fromOffsets: from, toOffset: to)
+                        let bgApps = selectedApps.filter { e in e.isShortcut && e.shortcutRunMode == .background }
+                        selectedApps = visibleApps + bgApps
                     }
                 }
-                .background(Color(nsColor: .windowBackgroundColor))
+                .listStyle(.plain)
+                .scrollDisabled(true)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5))
+                .frame(height: CGFloat(visible.count) * 62)
 
                 HStack(spacing: 6) {
-                    Image(systemName: "hand.tap").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Text("Tap a row to set it as the primary (large) window.")
+                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("Drag to reorder · tap to set primary window.")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
             }
@@ -1565,80 +1522,80 @@ struct AppGroupCreatorSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5))
             }
-            if !selectedApps.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Workspace summary").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
-                        AppGroupMacIcon(group: previewGroup, size: 44)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(name.isEmpty ? "Unnamed Workspace" : name).font(.system(size: 16, weight: .semibold))
-                            HStack(spacing: 6) {
-                                Text(layout.displayName).font(.system(size: 13)).foregroundStyle(.secondary)
-                                Text("·").foregroundStyle(.tertiary)
-                                Text("\(selectedApps.count) modules").font(.system(size: 13)).foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Keyboard shortcut").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Picker("", selection: $hotkeyIndex) {
+                        Text("None").tag(Int?.none)
+                        ForEach(1...9, id: \.self) { i in
+                            if takenHotkeys.contains(i) && i != existing?.hotkeyIndex {
+                                Text("⌘ ⌥ \(i)  (in use)").tag(Int?.some(i))
+                            } else {
+                                Text("⌘ ⌥ \(i)").tag(Int?.some(i))
                             }
                         }
                     }
-                    .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+                    .labelsHidden()
+                    .frame(width: 160)
+                    Text("Launch this Workspace from anywhere.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
     }
 
+    private var takenHotkeys: Set<Int> {
+        Set(server.appGroups.compactMap { $0.id == existing?.id ? nil : $0.hotkeyIndex })
+    }
+
     // MARK: - Navigation footer
 
     private var navigationFooter: some View {
-        HStack(spacing: 12) {
-            if currentStep > 0 {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { currentStep -= 1 }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left").font(.system(size: 13, weight: .semibold))
-                        Text("Back").font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(.primary)
-                    .frame(height: 46)
-                    .padding(.horizontal, 20)
-                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5))
+        HStack(spacing: 10) {
+            Button("Cancel") { dismiss() }
+                .controlSize(.large)
+                .keyboardShortcut(.cancelAction)
+
+            if existing != nil, let onDelete {
+                Button(role: .destructive) { showDeleteConfirm = true } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
                 }
-                .buttonStyle(.plain)
+                .controlSize(.large)
+                .help("Delete Workspace")
+                .confirmationDialog("Delete \"\(name.isEmpty ? "this workspace" : name)\"?",
+                                    isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                    Button("Delete Workspace", role: .destructive) { dismiss(); onDelete() }
+                    Button("Cancel", role: .cancel) {}
+                } message: { Text("This cannot be undone.") }
             }
+
             Spacer()
+
+            if currentStep > 0 {
+                Button("Back") {
+                    stepForward = false
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { currentStep -= 1 }
+                }
+                .controlSize(.large)
+            }
             if isLastStep {
-                Button { onSave(makeGroup()) } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark").font(.system(size: 13, weight: .bold))
-                        Text("Save Workspace").font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(height: 46)
-                    .padding(.horizontal, 24)
-                    .background(isValid ? Color.accentColor : Color.secondary.opacity(0.4),
-                                in: RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.plain)
-                .disabled(!isValid)
-                .keyboardShortcut(.defaultAction)
+                Button("Save Workspace") { onSave(makeGroup()) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!isValid)
+                    .keyboardShortcut(.defaultAction)
             } else {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { currentStep += 1 }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("Next").font(.system(size: 15, weight: .semibold))
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(height: 46)
-                    .padding(.horizontal, 24)
-                    .background(canAdvance ? Color.accentColor : Color.secondary.opacity(0.4),
-                                in: RoundedRectangle(cornerRadius: 12))
+                Button("Continue") {
+                    stepForward = true
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { currentStep += 1 }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(!canAdvance)
+                .keyboardShortcut(.defaultAction)
             }
         }
     }
@@ -1777,10 +1734,12 @@ struct AppGroupCreatorSheet: View {
 struct AppGroupAppIcon: View {
     let path: String
     let name: String
+    var size: CGFloat = 26
+    @State private var img: NSImage?
 
     var body: some View {
         Group {
-            if let img = MacIconImageCache.shared.image(forAppPath: path) {
+            if let img {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -1788,9 +1747,17 @@ struct AppGroupAppIcon: View {
                 Image(systemName: "app")
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(.secondary)
+                    .font(.system(size: size * 0.55))
             }
         }
-        .frame(width: 26, height: 26)
+        .frame(width: size, height: size)
+        .task(id: path) {
+            guard img == nil else { return }
+            let loaded = await Task.detached(priority: .userInitiated) {
+                MacIconImageCache.shared.image(forAppPath: path)
+            }.value
+            if let loaded { img = loaded }
+        }
     }
 }
 
@@ -2104,30 +2071,38 @@ struct ContentView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
 
-                    // PIN block — collapsible
+                    // PIN + QR block — collapsible
                     if showPairingPanel {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("PAIR IPHONE")
-                                .font(.system(size: 9, weight: .heavy))
-                                .tracking(1.1)
-                                .foregroundStyle(.tertiary)
+                        VStack(spacing: 10) {
+                            Image(nsImage: MacQRCodeImage.make(from: server.pin))
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 96, height: 96)
+                                .padding(8)
+                                .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                                )
 
                             Text(server.pin)
-                                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.primary)
-                                .kerning(3)
+                                .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                                .kerning(4)
 
-                            Text("Open Rewindpad on your iPhone and enter this PIN.")
-                                .font(.caption2)
+                            Text("Scan the code or enter this PIN in Rewindpad on your iPhone.")
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 12)
                         .background(.quaternary.opacity(0.5),
-                                    in: RoundedRectangle(cornerRadius: 9))
+                                    in: RoundedRectangle(cornerRadius: 10))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 9)
+                            RoundedRectangle(cornerRadius: 10)
                                 .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
                         )
                         .padding(.horizontal, 16)
@@ -2301,17 +2276,17 @@ struct BarMacView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("Launchpad")
-                .font(.largeTitle.weight(.semibold))
-                .multilineTextAlignment(.center)
-
-            Text("Organize your iPhone Launchpad view from your Mac.")
-                .font(.system(size: 14, weight: .medium))
+                .font(.title.weight(.bold))
+            Text("Arrange your iPhone home screen from your Mac.")
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 24)
+        .padding(.top, 22)
+        .padding(.bottom, 14)
     }
 
 

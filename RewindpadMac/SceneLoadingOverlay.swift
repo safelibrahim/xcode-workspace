@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 // MARK: - Loading overlay panel
@@ -10,6 +11,10 @@ final class SceneLoadingOverlayManager {
 
     private var panel: NSPanel?
     private var dismissTask: DispatchWorkItem?
+    private var shownAt: Date?
+    /// The shield is always visible at least this long, so the loader never
+    /// just blinks even when apps settle instantly.
+    private let minimumDisplayTime: TimeInterval = 2.0
 
     /// Shows the overlay immediately and auto-dismisses after `duration` seconds.
     func show(sceneName: String, icon: String, screen: NSScreen,
@@ -49,16 +54,29 @@ final class SceneLoadingOverlayManager {
         }
 
         panel = p
+        shownAt = Date()
 
         let task = DispatchWorkItem { [weak self] in self?.dismiss() }
         dismissTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: task)
     }
 
-    /// Fades the overlay out and releases it.
+    /// Fades the overlay out and releases it. Dismissals arriving before the
+    /// minimum display time are deferred until it has elapsed.
     func dismiss() {
+        if let shownAt {
+            let remaining = minimumDisplayTime - Date().timeIntervalSince(shownAt)
+            if remaining > 0 {
+                dismissTask?.cancel()
+                let task = DispatchWorkItem { [weak self] in self?.dismiss() }
+                dismissTask = task
+                DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: task)
+                return
+            }
+        }
         dismissTask?.cancel()
         dismissTask = nil
+        shownAt = nil
         guard let p = panel else { return }
         panel = nil
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -83,32 +101,12 @@ private struct SceneLoadingView: View {
     var body: some View {
         ZStack {
             // Dark dimming layer
-            Color.black.opacity(0.62)
+            Color.black.opacity(0.90)
                 .ignoresSafeArea()
 
             VStack(spacing: 18) {
-                ZStack {
-                    // Spinner ring around the scene icon
-                    Circle()
-                        .stroke(Color.white.opacity(0.12), lineWidth: 3)
-                        .frame(width: 84, height: 84)
-                    Circle()
-                        .trim(from: 0, to: 0.28)
-                        .stroke(
-                            Color.white.opacity(0.9),
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                        )
-                        .frame(width: 84, height: 84)
-                        .rotationEffect(.degrees(spinning ? 360 : 0))
-                        .animation(
-                            .linear(duration: 1.0).repeatForever(autoreverses: false),
-                            value: spinning
-                        )
-
-                    Image(systemName: icon)
-                        .font(.system(size: 32, weight: .medium))
-                        .foregroundStyle(.white)
-                }
+                CubesLoader()
+                    .frame(width: 84, height: 84)
 
                 VStack(spacing: 4) {
                     Text(sceneName)
@@ -128,5 +126,56 @@ private struct SceneLoadingView: View {
                 appeared = true
             }
         }
+    }
+}
+
+// MARK: - Cubes loader
+
+/// Sliding-puzzle cube loader: three outlined squares in a 2×2 grid; each
+/// tick the cube beside the empty slot slides into it, cycling forever.
+private struct CubesLoader: View {
+    @State private var cubeSlots: [Int] = [0, 1, 2]   // slot index per cube
+    @State private var hole = 3                        // the empty slot
+
+    private let cube: CGFloat = 30
+    private let gap: CGFloat  = 9
+
+    // Slot centers in a 2×2 grid, clockwise: TL, TR, BR, BL.
+    private func center(of slot: Int, in size: CGSize) -> CGPoint {
+        let span = cube + gap
+        let originX = (size.width  - span) / 2
+        let originY = (size.height - span) / 2
+        switch slot {
+        case 0:  return CGPoint(x: originX,        y: originY)
+        case 1:  return CGPoint(x: originX + span, y: originY)
+        case 2:  return CGPoint(x: originX + span, y: originY + span)
+        default: return CGPoint(x: originX,        y: originY + span)
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ForEach(0..<3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 3.5)
+                    .frame(width: cube, height: cube)
+                    .position(center(of: cubeSlots[i], in: geo.size))
+            }
+        }
+        // Render-independent loop — re-renders can't restart or stall it,
+        // and it ends automatically when the view goes away.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                // The cube sitting counterclockwise of the hole slides into it.
+                let source = (hole + 1) % 4
+                guard let mover = cubeSlots.firstIndex(of: source) else { continue }
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    cubeSlots[mover] = hole
+                }
+                hole = source
+            }
+        }
+        .accessibilityLabel("Loading")
     }
 }

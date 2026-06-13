@@ -236,16 +236,37 @@ final class AppGroupSwitchOverlayManager: NSObject {
 
     /// Returns the current window rect for `entry` in NS (bottom-left origin) screen coordinates.
     private func windowNSRect(for entry: AppGroupEntry, screenHeight: CGFloat) -> NSRect? {
-        guard let app = NSWorkspace.shared.runningApplications.first(where: {
-            $0.bundleURL?.path == entry.path
-        }) else { return nil }
+        // Shortcuts run without a stable window to anchor an overlay to.
+        if entry.isShortcut { return nil }
+
+        // Match the running app by bundle ID first (robust to apps living in
+        // ~/Applications, symlinks, or a path that differs from the stored
+        // one), then fall back to an exact path match. This is what makes the
+        // overlay buttons appear on EVERY launched window, not just the ones
+        // whose recorded path happens to equal the running bundle path.
+        let running = NSWorkspace.shared.runningApplications
+        let app = running.first {
+            !entry.bundleID.isEmpty && $0.bundleIdentifier == entry.bundleID
+        } ?? running.first { $0.bundleURL?.path == entry.path }
+        guard let app else { return nil }
 
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        var windowsRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement],
-              let win     = windows.first
-        else { return nil }
+
+        // Prefer the app's main window; fall back to its first standard window.
+        var win: AXUIElement?
+        var mainRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axApp, kAXMainWindowAttribute as CFString, &mainRef) == .success,
+           let mv = mainRef, CFGetTypeID(mv) == AXUIElementGetTypeID() {
+            win = (mv as! AXUIElement)
+        }
+        if win == nil {
+            var windowsRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+               let windows = windowsRef as? [AXUIElement] {
+                win = windows.first
+            }
+        }
+        guard let win else { return nil }
 
         var posRef:  CFTypeRef?
         var sizeRef: CFTypeRef?
@@ -337,7 +358,11 @@ final class AppGroupSwitchOverlayManager: NSObject {
 
     private func showAddMenu(for slotID: String) {
         guard let slot = slots[slotID] else { return }
-        let candidates = candidateApps(excludingGroupOf: slot)
+        // Hide apps whose minimum window size can't fit the remaining space —
+        // offering them would only lead to a "can't add" dead end.
+        let candidates = candidateApps(excludingGroupOf: slot).filter { app in
+            server?.canAddToScene(groupID: slot.groupID, app: app) ?? true
+        }
         guard !candidates.isEmpty else { return }
 
         let menu = NSMenu(title: "")
@@ -522,14 +547,14 @@ struct SlotButtonCluster: View {
 
     var body: some View {
         HStack(spacing: 6) {
+            if showsRemove {
+                GlassCircleButton(systemName: "minus", action: onRemove, iconSize: 13)
+            }
             if showsAdd {
                 GlassCircleButton(systemName: "plus", action: onAdd, iconSize: 13)
             }
             GlassCircleButton(systemName: "square.stack.3d.down.forward.fill",
                               action: onSwitch, iconSize: 12)
-            if showsRemove {
-                GlassCircleButton(systemName: "minus", action: onRemove, iconSize: 13)
-            }
         }
         .padding(.trailing, 12)
         // Fill the panel (sized per visible button count), hugging the

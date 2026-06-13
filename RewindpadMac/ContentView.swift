@@ -406,30 +406,35 @@ struct AppGroupsManagementView: View {
             if server.appGroups.isEmpty {
                 workspaceEmptyState
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .bottom) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Workspaces")
-                                    .font(.title.weight(.bold))
-                                Text("Launch groups of apps with one click.")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button {
-                                editingGroup = nil
-                                showCreator = true
-                            } label: {
-                                Label("New Workspace", systemImage: "plus")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.regular)
+                VStack(alignment: .leading, spacing: 0) {
+                    // Fixed header — only the cards below scroll.
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Workspaces")
+                                .font(.title.weight(.bold))
+                            Text("Launch groups of apps with one click.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 22)
-                        .padding(.bottom, 14)
+                        Spacer()
+                        Button {
+                            editingGroup = nil
+                            showCreator = true
+                        } label: {
+                            Label("New Workspace", systemImage: "plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 22)
+                    .padding(.bottom, 14)
 
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.14))
+                        .frame(height: 1)
+
+                    ScrollView {
                         LazyVGrid(columns: columns, spacing: 14) {
                             ForEach(server.appGroups) { group in
                                 let entries = group.apps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }
@@ -446,6 +451,7 @@ struct AppGroupsManagementView: View {
                             }
                         }
                         .padding(.horizontal, 24)
+                        .padding(.top, 18)
                         .padding(.bottom, 24)
                     }
                 }
@@ -522,33 +528,25 @@ struct AppGroupCard: View {
                     bottomTrailingRadius: 0, topTrailingRadius: 16, style: .continuous))
 
             HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(group.name)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Image(systemName: group.layout.icon)
-                            .font(.system(size: 9, weight: .medium))
+                    if let label = group.hotkeyLabel {
+                        Text(label)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(.secondary)
-                        Text("\(group.layout.displayName)  ·  \(group.apps.count) app\(group.apps.count == 1 ? "" : "s")")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
                     }
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
                     if hasConflict {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 12))
                             .foregroundStyle(Color(nsColor: .systemOrange))
                             .help("Window sizes conflict — edit to fix")
-                    }
-                    if let label = group.hotkeyLabel {
-                        Text(label)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 5).padding(.vertical, 2)
-                            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
                     }
                     Button(action: onLaunch) {
                         Image(systemName: "play.fill")
@@ -660,7 +658,7 @@ struct AppGroupLayoutPreview: View {
         case .split1x2:
             let mw = (c.width * 0.60).rounded()
             let sw = c.width - mw - gap
-            let sc = max(apps.count - 1, 1)
+            let sc = apps.count >= 2 ? apps.count - 1 : 2
             let sh = (c.height - gap * CGFloat(sc - 1)) / CGFloat(sc)
             windowPane(CGRect(x: c.minX, y: c.minY, width: mw, height: c.height), appIndex: 0, apps: apps)
             ForEach(0..<sc, id: \.self) { i in
@@ -669,7 +667,7 @@ struct AppGroupLayoutPreview: View {
         case .split2x1:
             let sw = (c.width * 0.40).rounded()
             let mw = c.width - sw - gap
-            let sc = max(apps.count - 1, 1)
+            let sc = apps.count >= 2 ? apps.count - 1 : 2
             let sh = (c.height - gap * CGFloat(sc - 1)) / CGFloat(sc)
             ForEach(0..<sc, id: \.self) { i in
                 windowPane(CGRect(x: c.minX, y: c.minY+CGFloat(i)*(sh+gap), width: sw, height: sh), appIndex: i+1, apps: apps)
@@ -678,7 +676,7 @@ struct AppGroupLayoutPreview: View {
         case .split1x2h:
             let mh = (c.height * 0.60).rounded()
             let bh = c.height - mh - gap
-            let bc = max(apps.count - 1, 1)
+            let bc = apps.count >= 2 ? apps.count - 1 : 2
             let bw = (c.width - gap * CGFloat(bc - 1)) / CGFloat(bc)
             windowPane(CGRect(x: c.minX, y: c.minY, width: c.width, height: mh), appIndex: 0, apps: apps)
             ForEach(0..<bc, id: \.self) { i in
@@ -693,7 +691,7 @@ struct AppGroupLayoutPreview: View {
                 CGRect(x: c.minX,          y: c.minY+hh+gap,   width: hw,               height: c.height-hh-gap),
                 CGRect(x: c.minX+hw+gap,   y: c.minY+hh+gap,   width: c.width-hw-gap,   height: c.height-hh-gap),
             ]
-            ForEach(0..<min(max(apps.count, 1), 4), id: \.self) { i in
+            ForEach(0..<4, id: \.self) { i in
                 windowPane(slots[i], appIndex: i, apps: apps)
             }
         }
@@ -917,6 +915,17 @@ struct AppGroupCreatorSheet: View {
     @State private var stepForward: Bool = true
     @State private var appsTab: Int = 0
     @State private var cachedSortedApps: [AvailableApp] = []
+    @State private var clashingCandidateIDs: Set<String> = []
+    @State private var pendingShortcut: AppleShortcut? = nil
+    @State private var showSaveBlocked = false
+    @State private var isVerifyingFit = false
+    @State private var recentLinks: [RecentLinkItem] = []
+
+    struct RecentLinkItem: Codable, Identifiable, Equatable {
+        var id: String { url }
+        let url: String
+        let browser: String
+    }
     @Environment(\.dismiss) private var dismiss
 
     // 5 steps matching iPhone app
@@ -959,7 +968,44 @@ struct AppGroupCreatorSheet: View {
     }
 
     private var isValid: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !selectedApps.isEmpty && hardConflict == nil
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !selectedApps.isEmpty
+            && hardConflict == nil
+            && visibleSelectedCount <= layoutCapacity
+            && slotIssues.isEmpty
+    }
+
+    /// How many windows the chosen layout can hold.
+    private var layoutCapacity: Int {
+        switch layout {
+        case .split1x1, .split1x1v: return 2
+        case .split1x2, .split2x1, .split1x2h: return 3
+        case .grid2x2: return 4
+        }
+    }
+
+    /// Apps that occupy a window slot (background shortcuts don't).
+    private var visibleSelectedCount: Int {
+        selectedApps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }.count
+    }
+
+    private var layoutIsFull: Bool { visibleSelectedCount >= layoutCapacity }
+
+    /// Per-slot fit problems at the layout's standard split ratios —
+    /// catches a wide-minimum app dropped into a small slot after reordering.
+    private var slotIssues: [CompatibilityIssue] {
+        guard let screen = NSScreen.screens.first else { return [] }
+        let vis = selectedApps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }
+        guard vis.count >= 2 else { return [] }
+        return ScreenCompatibilityChecker.check(
+            apps: vis, layout: layout,
+            splitRatio: 0.6, splitRatioSecondary: 0.5,
+            screen: screen,
+            minSize: { entry in
+                let s = server.minSlotSize(for: entry)
+                return (s.width > 40 || s.height > 40) ? s : nil
+            }
+        )
     }
 
     private var hardConflict: (String, String)? {
@@ -972,7 +1018,8 @@ struct AppGroupCreatorSheet: View {
     private var canAdvance: Bool {
         switch currentStep {
         case 0: return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case 1, 2: return hardConflict == nil
+        case 1, 2: return hardConflict == nil && visibleSelectedCount <= layoutCapacity
+        case 3: return hardConflict == nil && visibleSelectedCount <= layoutCapacity && slotIssues.isEmpty
         default: return true
         }
     }
@@ -981,14 +1028,7 @@ struct AppGroupCreatorSheet: View {
         HStack(spacing: 0) {
             // ── Left — wizard steps ───────────────────────────────────────
             VStack(spacing: 0) {
-                progressBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 18)
-                    .padding(.bottom, 14)
-
-                Divider()
-
-                ScrollView {
+                ZStack(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: 0) {
                         // Title block — macOS text styles
                         VStack(alignment: .leading, spacing: 4) {
@@ -998,18 +1038,29 @@ struct AppGroupCreatorSheet: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 16)
 
-                        // Step body
+                        Rectangle()
+                            .fill(Color.primary.opacity(0.14))
+                            .frame(height: 1)
+                            .padding(.horizontal, -24)
+                            .padding(.bottom, 20)
+
+                        // Step body — only inner lists/grids scroll.
                         stepContent
+
+                        Spacer(minLength: 0)
                     }
                     .padding(24)
                     .id(currentStep)
                     .transition(.asymmetric(
-                        insertion: .move(edge: stepForward ? .trailing : .leading).combined(with: .opacity),
-                        removal:   .move(edge: stepForward ? .leading  : .trailing).combined(with: .opacity)
+                        insertion: .opacity.combined(with: .offset(x: stepForward ? 28 : -28)),
+                        removal:   .opacity.combined(with: .offset(x: stepForward ? -28 : 28))
                     ))
                 }
+                .animation(.spring(response: 0.32, dampingFraction: 0.88), value: currentStep)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
 
                 Divider()
 
@@ -1028,39 +1079,138 @@ struct AppGroupCreatorSheet: View {
         }
         .frame(width: 860, height: 720)
         .task {
+            // Quietly record AXMinSize for everything currently running, so
+            // fit predictions keep getting better over time.
+            server.harvestMinSizesFromRunningApps()
             guard cachedSortedApps.isEmpty else { return }
             let sorted = await Task.detached(priority: .userInitiated) {
                 server.availableApps.sorted { $0.name < $1.name }
             }.value
             cachedSortedApps = sorted
+            recomputeClashes()
+            loadRecentLinks()
         }
+        .onChange(of: selectedApps) { _, _ in recomputeClashes() }
+        .onChange(of: layout) { _, _ in recomputeClashes() }
+    }
+
+    /// Which not-yet-selected apps would create a size conflict if added,
+    /// given the current selection and layout. Drives the per-cell warning.
+    private func recomputeClashes() {
+        guard let screen = NSScreen.screens.first else { clashingCandidateIDs = []; return }
+        let sel = selectedApps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }
+        guard !sel.isEmpty, !layoutIsFull else { clashingCandidateIDs = []; return }
+        let provider: (AppGroupEntry) -> CGSize? = { entry in
+            let s = server.minSlotSize(for: entry)
+            return (s.width > 40 || s.height > 40) ? s : nil
+        }
+        var out = Set<String>()
+        for app in cachedSortedApps.prefix(120) where !sel.contains(where: { $0.id == app.id }) {
+            let entry = AppGroupEntry(id: app.id, appName: app.name, bundleID: app.id, path: app.path)
+            let candidate = sel + [entry]
+            let ratioConflict = server.conflictPair(entries: candidate, layout: layout, screen: screen) != nil
+            let slotConflict = !ScreenCompatibilityChecker.check(
+                apps: candidate, layout: layout,
+                splitRatio: 0.6, splitRatioSecondary: 0.5,
+                screen: screen, minSize: provider
+            ).filter { $0.appName == app.name }.isEmpty
+            if ratioConflict || slotConflict {
+                out.insert(app.id)
+            }
+        }
+        clashingCandidateIDs = out
     }
 
     // MARK: - Preview pane
 
     private var previewPane: some View {
-        ZStack(alignment: .bottomLeading) {
-            AppGroupLayoutPreview(group: previewGroup, conflicting: hardConflict != nil && currentStep == 1)
-
-            // Vignette gradient for name legibility
+        ZStack {
+            // Backdrop
             LinearGradient(
-                stops: [
-                    .init(color: .black.opacity(0.0), location: 0.6),
-                    .init(color: .black.opacity(0.55), location: 1.0)
-                ],
+                colors: [Color(red: 0.09, green: 0.09, blue: 0.12),
+                         Color(red: 0.05, green: 0.05, blue: 0.08)],
                 startPoint: .top, endPoint: .bottom
             )
-            .allowsHitTesting(false)
 
-            // Workspace name — animates as user types
-            Text(name.isEmpty ? "My Workspace" : name)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
-                .lineLimit(1)
-                .padding(.horizontal, 20)
-                .padding(.bottom, 18)
-                .animation(.spring(response: 0.25, dampingFraction: 0.85), value: name)
+            VStack(spacing: 18) {
+                Spacer()
+
+                // Miniature display
+                VStack(spacing: 0) {
+                    // Menu bar hint
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.white.opacity(0.25)).frame(width: 4, height: 4)
+                        Circle().fill(Color.white.opacity(0.18)).frame(width: 4, height: 4)
+                        Circle().fill(Color.white.opacity(0.12)).frame(width: 4, height: 4)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 14)
+                    .background(Color.white.opacity(0.06))
+
+                    AppGroupLayoutPreview(group: previewGroup, conflicting: (hardConflict != nil || !slotIssues.isEmpty) && (1...3).contains(currentStep))
+                }
+                .aspectRatio(16.0 / 10.5, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+                .padding(.horizontal, 26)
+
+                // Slot usage — green when exactly full, orange when over
+                let overCapacity = visibleSelectedCount > layoutCapacity
+                HStack(spacing: 5) {
+                    if overCapacity {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
+                    } else if layoutIsFull {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.green)
+                    }
+                    Text(overCapacity
+                         ? "\(visibleSelectedCount) windows — this layout fits \(layoutCapacity)"
+                         : "\(visibleSelectedCount) of \(layoutCapacity) windows")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(layoutIsFull ? 0.85 : 0.5))
+                        .contentTransition(.numericText(value: Double(visibleSelectedCount)))
+                        .animation(.easeInOut(duration: 0.2), value: visibleSelectedCount)
+                }
+
+                // Background shortcuts — run on launch, no window slot
+                let bgShortcuts = selectedApps.filter { $0.isShortcut && $0.shortcutRunMode == .background }
+                if !bgShortcuts.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Runs on launch")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                        ChipFlowLayout(spacing: 6) {
+                            ForEach(bgShortcuts) { entry in
+                                HStack(spacing: 5) {
+                                    Image(systemName: "bolt.fill")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                    Text(entry.appName)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                        .lineLimit(1)
+                                }
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(Color.white.opacity(0.07), in: Capsule())
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 26)
+                    .padding(.top, 6)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                Spacer()
+            }
         }
     }
 
@@ -1072,6 +1222,8 @@ struct AppGroupCreatorSheet: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .fixedSize()
+                .contentTransition(.numericText(value: Double(currentStep)))
+                .animation(.easeInOut(duration: 0.2), value: currentStep)
             HStack(spacing: 3) {
                 ForEach(stepTitles.indices, id: \.self) { i in
                     RoundedRectangle(cornerRadius: 2)
@@ -1151,14 +1303,46 @@ struct AppGroupCreatorSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
 
             if let (a, b) = hardConflict {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                    Text("\(a) and \(b) can't fit on this screen together. Choose a different layout or remove an app.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.orange)
+                        Text("\(a) and \(b) can't fit on this screen together. Choose a different layout or remove an app below.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ChipFlowLayout(spacing: 6) {
+                        ForEach(selectedApps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }) { entry in
+                            Button {
+                                withAnimation(.spring(response: 0.25)) {
+                                    selectedApps.removeAll { $0.id == entry.id }
+                                    if primaryAppID == entry.id { primaryAppID = selectedApps.first?.id }
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    AppGroupAppIcon(path: entry.path, name: entry.appName, size: 18)
+                                    Text(entry.appName)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .lineLimit(1)
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 9).padding(.vertical, 5)
+                                .background(Color.primary.opacity(0.06), in: Capsule())
+                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5))
+                            }
+                            .buttonStyle(.plain)
+                            .help("Remove \(entry.appName)")
+                            .transition(.scale(scale: 0.85).combined(with: .opacity))
+                        }
+                    }
                 }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .transition(.opacity)
             }
         }
@@ -1190,41 +1374,53 @@ struct AppGroupCreatorSheet: View {
     // Step 2 — Apps (tabbed)
     private var stepApps: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // ── Added chips (wrapping) ───────────────────────────────────
-            if !selectedApps.isEmpty {
-                ChipFlowLayout(spacing: 6) {
-                    ForEach(selectedApps) { entry in
-                        Button {
-                            withAnimation(.spring(response: 0.25)) {
-                                selectedApps.removeAll { $0.id == entry.id }
-                                if primaryAppID == entry.id { primaryAppID = selectedApps.first?.id }
-                            }
-                        } label: {
-                            HStack(spacing: 5) {
-                                AppGroupAppIcon(path: entry.path, name: entry.appName, size: 18)
-                                Text(entry.appName).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
-                            }
-                            .padding(.horizontal, 9).padding(.vertical, 5)
-                            .background(Color.accentColor.opacity(0.10), in: Capsule())
-                            .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.5))
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
-                    }
-                }
-            }
+            // ── Sliding-pill tab selector ────────────────────────────────
+            sourceToggle
+                .padding(.bottom, 4)
 
-            // ── Native segmented tab selector ────────────────────────────
-            Picker("", selection: $appsTab) {
-                Text("Apps").tag(0)
-                Text("Links").tag(1)
-                Text("Shortcuts").tag(2)
+            if let (a, b) = hardConflict {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.orange)
+                    Text("\(a) and \(b) need more space than this layout allows. Remove one or pick a different layout.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let issue = slotIssues.first {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.orange)
+                    Text("\(issue.appName)'s window won't fit in its spot. You can rearrange windows in the next step, or pick a roomier layout.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if !layoutIsFull && !clashingCandidateIDs.isEmpty && appsTab == 0 {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "info.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.accentColor)
+                    Text("Some apps are unavailable because they need more screen space than this layout has left. Remove an app or choose a roomier layout to use them.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: .infinity)
-            .padding(.bottom, 4)
 
             // ── Tab content ──────────────────────────────────────────────
             if appsTab == 0 {
@@ -1272,12 +1468,14 @@ struct AppGroupCreatorSheet: View {
                 }
                 .padding(.vertical, 4)
             }
-            .frame(height: 300)
+            .frame(maxHeight: .infinity)
         }
     }
 
     private func appIconCell(_ app: AvailableApp) -> some View {
         let added = selectedApps.contains { $0.id == app.id }
+        let blocked = !added && layoutIsFull
+        let clashes = !added && !blocked && clashingCandidateIDs.contains(app.id)
         return Button {
             withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
                 if added {
@@ -1320,15 +1518,25 @@ struct AppGroupCreatorSheet: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(added ? Color.primary.opacity(0.06) : Color.clear)
             )
+            .opacity(blocked || clashes ? 0.35 : 1.0)
+            .animation(.easeInOut(duration: 0.15), value: blocked || clashes)
         }
         .buttonStyle(.plain)
+        .disabled(blocked || clashes)
+        .help(blocked ? "This layout fits up to \(layoutCapacity) windows"
+              : clashes ? clashHelp(app) : "")
+    }
+
+    private func clashHelp(_ app: AvailableApp) -> String {
+        if let s = server.knownMinSize(bundleID: app.id) {
+            return "\(app.name) needs a window at least \(Int(s.width)) pt wide — it won't fit alongside your current apps in this layout."
+        }
+        return "Won't fit alongside your current apps in this layout."
     }
 
     // Links tab
     private var linksTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Open a webpage alongside your apps.")
-                .font(.system(size: 14)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "link")
@@ -1337,6 +1545,7 @@ struct AppGroupCreatorSheet: View {
                     TextField("https://…", text: $urlInput)
                         .textFieldStyle(.plain)
                         .font(.system(size: 15))
+                        .onSubmit { addBrowserTab() }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 11)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
@@ -1352,20 +1561,178 @@ struct AppGroupCreatorSheet: View {
                     }
                     .labelsHidden().frame(width: 120)
                     Spacer()
-                    Button { addBrowserTab() } label: {
-                        Text("Add Link")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 18).padding(.vertical, 9)
-                            .background(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                        ? Color.secondary.opacity(0.35) : Color.accentColor,
-                                        in: RoundedRectangle(cornerRadius: 10))
+                    Button("Add Link") { addBrowserTab() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || layoutIsFull)
+                        .help(layoutIsFull ? "This layout fits up to \(layoutCapacity) windows" : "")
+                }
+            }
+
+            if !recentLinks.isEmpty {
+                Text("Recents")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 106, maximum: 124), spacing: 4)],
+                        spacing: 8
+                    ) {
+                        ForEach(recentLinks) { item in recentLinkCell(item) }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .padding(.vertical, 4)
+                }
+                .frame(maxHeight: .infinity)
+            }
+        }
+    }
+
+    @Namespace private var toggleNamespace
+
+    /// Sliding-capsule toggle — the selected pill glides between segments.
+    private var sourceToggle: some View {
+        HStack(spacing: 2) {
+            ForEach(Array(["Apps", "Links", "Shortcuts"].enumerated()), id: \.offset) { i, title in
+                Button {
+                    withAnimation(.spring(response: 0.30, dampingFraction: 0.82)) { appsTab = i }
+                } label: {
+                    Text(title)
+                        .font(.system(size: 13, weight: appsTab == i ? .semibold : .medium))
+                        .foregroundStyle(appsTab == i ? .white : .secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background {
+                            if appsTab == i {
+                                Capsule()
+                                    .fill(Color.accentColor)
+                                    .matchedGeometryEffect(id: "togglePill", in: toggleNamespace)
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
+    }
+
+    /// Loads real site icons for recent links: tries the high-res
+    /// apple-touch-icon first, then favicon.ico. Cached per host.
+    final class FaviconLoader {
+        static let shared = FaviconLoader()
+        private let cache = NSCache<NSString, NSImage>()
+        private var failedHosts = Set<String>()
+
+        func icon(for urlString: String) async -> NSImage? {
+            guard let host = URL(string: urlString)?.host else { return nil }
+            if let cached = cache.object(forKey: host as NSString) { return cached }
+            guard !failedHosts.contains(host) else { return nil }
+            for candidate in ["https://\(host)/apple-touch-icon.png",
+                              "https://\(host)/favicon.ico"] {
+                guard let url = URL(string: candidate) else { continue }
+                guard let (data, response) = try? await URLSession.shared.data(from: url),
+                      (response as? HTTPURLResponse)?.statusCode == 200,
+                      let image = NSImage(data: data), image.size.width > 4 else { continue }
+                cache.setObject(image, forKey: host as NSString)
+                return image
+            }
+            failedHosts.insert(host)
+            return nil
+        }
+    }
+
+    private struct LinkFaviconTile: View {
+        let urlString: String
+        @State private var favicon: NSImage?
+
+        var body: some View {
+            ZStack {
+                if let favicon {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .fill(Color.white)
+                    Image(nsImage: favicon)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .fill(LinearGradient(colors: [Color.teal, Color.blue.opacity(0.75)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "globe")
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 68, height: 68)
+            .task(id: urlString) {
+                if favicon == nil {
+                    favicon = await FaviconLoader.shared.icon(for: urlString)
                 }
             }
         }
+    }
+
+    private func recentLinkCell(_ item: RecentLinkItem) -> some View {
+        let added = selectedApps.contains { $0.url == item.url }
+        let blocked = !added && layoutIsFull
+        let host = URL(string: item.url)?.host?.replacingOccurrences(of: "www.", with: "") ?? item.url
+        return Button {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                if added {
+                    selectedApps.removeAll { $0.url == item.url }
+                    if primaryAppID != nil && !selectedApps.contains(where: { $0.id == primaryAppID }) {
+                        primaryAppID = selectedApps.first?.id
+                    }
+                } else {
+                    let bc = BrowserChoice(rawValue: item.browser) ?? .safari
+                    let entry = AppGroupEntry(id: UUID().uuidString,
+                                              appName: "\(bc.appName) — \(host)",
+                                              bundleID: bc.bundleID, path: bc.appPath,
+                                              url: item.url, browser: bc.rawValue)
+                    selectedApps.append(entry)
+                    if primaryAppID == nil { primaryAppID = entry.id }
+                }
+            }
+        } label: {
+            VStack(spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    LinkFaviconTile(urlString: item.url)
+                        .scaleEffect(added ? 0.90 : 1.0)
+                        .animation(.spring(response: 0.2), value: added)
+
+                    if added {
+                        ZStack {
+                            Circle().fill(Color.accentColor).frame(width: 20, height: 20)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                        .offset(x: 6, y: -6)
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                }
+                Text(host)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(width: 104)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(added ? Color.primary.opacity(0.06) : Color.clear)
+            )
+            .opacity(blocked ? 0.35 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(blocked)
+        .help(blocked ? "This layout fits up to \(layoutCapacity) windows" : item.url)
     }
 
     // Shortcuts tab
@@ -1400,14 +1767,116 @@ struct AppGroupCreatorSheet: View {
                         : server.availableShortcuts.filter { $0.name.lowercased().contains(q) }
                 }()
                 ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(fsc.prefix(60)) { s in availableShortcutRow(s) }
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 106, maximum: 124), spacing: 4)],
+                        spacing: 8
+                    ) {
+                        ForEach(fsc.prefix(60)) { s in shortcutIconCell(s) }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(maxHeight: .infinity)
+            }
+        }
+        .confirmationDialog(
+            "How should \u{201C}\(pendingShortcut?.name ?? "")\u{201D} run?",
+            isPresented: Binding(get: { pendingShortcut != nil },
+                                 set: { if !$0 { pendingShortcut = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Run in the Background") {
+                if let s = pendingShortcut { addShortcut(s, mode: .background) }
+                pendingShortcut = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            if !layoutIsFull {
+                Button("Show as a Window in the Layout") {
+                    if let s = pendingShortcut { addShortcut(s, mode: .slot) }
+                    pendingShortcut = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingShortcut = nil }
+        } message: {
+            Text("Window shortcuts take a slot in your layout. Background shortcuts simply run when the Workspace starts.")
+        }
+    }
+
+    private func shortcutIconCell(_ shortcut: AppleShortcut) -> some View {
+        let added = selectedApps.contains { $0.shortcutName == shortcut.name }
+        return Button {
+            if added {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+                    selectedApps.removeAll { $0.shortcutName == shortcut.name }
+                    if primaryAppID != nil && !selectedApps.contains(where: { $0.id == primaryAppID }) {
+                        primaryAppID = selectedApps.first?.id
                     }
                 }
-                .frame(height: 240)
-                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5))
+            } else if layoutIsFull {
+                // No window slot available — background is the only option.
+                addShortcut(shortcut, mode: .background)
+            } else {
+                pendingShortcut = shortcut
             }
+        } label: {
+            VStack(spacing: 6) {
+                ZStack(alignment: .topTrailing) {
+                    Group {
+                        if let icon = MacIconImageCache.shared.shortcutsAppIcon() {
+                            Image(nsImage: icon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                        } else {
+                            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .fill(LinearGradient(colors: [Color.purple, Color.purple.opacity(0.7)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .overlay(
+                                    Image(systemName: "bolt.fill")
+                                        .font(.system(size: 26, weight: .medium))
+                                        .foregroundStyle(.white)
+                                )
+                        }
+                    }
+                    .frame(width: 68, height: 68)
+                    .scaleEffect(added ? 0.90 : 1.0)
+                    .animation(.spring(response: 0.2), value: added)
+
+                    if added {
+                        ZStack {
+                            Circle().fill(Color.accentColor).frame(width: 20, height: 20)
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                        .offset(x: 6, y: -6)
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                }
+                Text(shortcut.name)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(width: 104)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(added ? Color.primary.opacity(0.06) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func addShortcut(_ shortcut: AppleShortcut, mode: ShortcutRunMode) {
+        let entryID = UUID().uuidString
+        var entry = AppGroupEntry(id: entryID, appName: shortcut.name,
+                                  bundleID: "com.apple.shortcuts",
+                                  path: "__shortcut__\(entryID)", shortcutName: shortcut.name)
+        entry.shortcutRunMode = mode
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) {
+            selectedApps.append(entry)
+            if primaryAppID == nil && mode == .slot { primaryAppID = entry.id }
         }
     }
 
@@ -1461,11 +1930,18 @@ struct AppGroupCreatorSheet: View {
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 8).padding(.vertical, 3)
                                     .background(Color.accentColor, in: Capsule())
+                            } else {
+                                Button("Set Primary") {
+                                    withAnimation(.easeInOut(duration: 0.15)) { primaryAppID = entry.id }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.primary.opacity(0.06), in: Capsule())
                             }
                         }
                         .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                        .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { primaryAppID = entry.id } }
                         .listRowBackground(isPrimary ? Color.accentColor.opacity(0.07) : Color(nsColor: .windowBackgroundColor))
                         .listRowSeparatorTint(Color.primary.opacity(0.07))
                     }
@@ -1482,10 +1958,40 @@ struct AppGroupCreatorSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5))
                 .frame(height: CGFloat(visible.count) * 62)
 
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.arrow.down").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Text("Drag to reorder · tap to set primary window.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                if let (a, b) = hardConflict {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.orange)
+                        Text("In this order, \(a) and \(b) don't fit on this screen. Move the wider app to the larger slot.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if let issue = slotIssues.first {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.orange)
+                        Text("\(issue.appName)'s window is too big for its spot. Drag it to a larger one.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 13)).foregroundStyle(.secondary)
+                        Text("Drag a row to reorder. The primary window gets the largest slot.")
+                            .font(.system(size: 14)).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -1524,24 +2030,55 @@ struct AppGroupCreatorSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Keyboard shortcut").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
-                HStack(spacing: 12) {
+                Text("Shortcut").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+                HStack(spacing: 14) {
+                    Image(systemName: "command")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keyboard shortcut")
+                            .font(.system(size: 15, weight: .medium))
+                        Text("Launch this Workspace from anywhere.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
                     Picker("", selection: $hotkeyIndex) {
                         Text("None").tag(Int?.none)
                         ForEach(1...9, id: \.self) { i in
                             if takenHotkeys.contains(i) && i != existing?.hotkeyIndex {
-                                Text("⌘ ⌥ \(i)  (in use)").tag(Int?.some(i))
+                                Text("⌘ ⌥ \(i) — in use").tag(Int?.some(i))
                             } else {
                                 Text("⌘ ⌥ \(i)").tag(Int?.some(i))
                             }
                         }
                     }
                     .labelsHidden()
-                    .frame(width: 160)
-                    Text("Launch this Workspace from anywhere.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    .fixedSize()
                 }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.5))
+            }
+        }
+    }
+
+    /// Measures the true minimum size of every selected app — launching apps
+    /// that aren't running so nothing validates on missing data — then runs
+    /// the final fit check before saving.
+    private func verifyAndSave() {
+        isVerifyingFit = true
+        Task {
+            for entry in selectedApps where !entry.isShortcut {
+                _ = await server.measureMinSizeForValidation(entry: entry)
+            }
+            isVerifyingFit = false
+            if hardConflict != nil || !slotIssues.isEmpty || visibleSelectedCount > layoutCapacity {
+                showSaveBlocked = true
+            } else {
+                onSave(makeGroup())
             }
         }
     }
@@ -1582,11 +2119,31 @@ struct AppGroupCreatorSheet: View {
                 .controlSize(.large)
             }
             if isLastStep {
-                Button("Save Workspace") { onSave(makeGroup()) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!isValid)
-                    .keyboardShortcut(.defaultAction)
+                Button {
+                    verifyAndSave()
+                } label: {
+                    if isVerifyingFit {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Checking window sizes…")
+                        }
+                    } else {
+                        Text("Save Workspace")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!isValid || isVerifyingFit)
+                .keyboardShortcut(.defaultAction)
+                .alert("This Workspace can't be saved yet", isPresented: $showSaveBlocked) {
+                    Button("Review Layout") {
+                        stepForward = false
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) { currentStep = 1 }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Some windows don't fit the chosen layout on this screen. Adjust the layout, apps, or window order first.")
+                }
             } else {
                 Button("Continue") {
                     stepForward = true
@@ -1694,7 +2251,7 @@ struct AppGroupCreatorSheet: View {
 
     private func addBrowserTab() {
         var raw = urlInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
+        guard !raw.isEmpty, !layoutIsFull else { return }
         if !raw.lowercased().hasPrefix("http://") && !raw.lowercased().hasPrefix("https://") { raw = "https://" + raw }
         let displayName = URL(string: raw)?.host ?? raw
         let entry = AppGroupEntry(id: UUID().uuidString,
@@ -1705,7 +2262,35 @@ struct AppGroupCreatorSheet: View {
             selectedApps.append(entry)
             if primaryAppID == nil { primaryAppID = entry.id }
         }
+        rememberRecentLink(url: raw, browser: browserChoice.rawValue)
         urlInput = ""
+    }
+
+    // MARK: - Recent links
+
+    private func loadRecentLinks() {
+        var items: [RecentLinkItem] = []
+        if let data = UserDefaults.standard.data(forKey: "rw_recent_links"),
+           let decoded = try? JSONDecoder().decode([RecentLinkItem].self, from: data) {
+            items = decoded
+        }
+        // Seed with links already used in other Workspaces.
+        for group in server.appGroups {
+            for e in group.apps {
+                guard let url = e.url, !items.contains(where: { $0.url == url }) else { continue }
+                items.append(RecentLinkItem(url: url, browser: e.browser ?? BrowserChoice.safari.rawValue))
+            }
+        }
+        recentLinks = Array(items.prefix(12))
+    }
+
+    private func rememberRecentLink(url: String, browser: String) {
+        var items = recentLinks.filter { $0.url != url }
+        items.insert(RecentLinkItem(url: url, browser: browser), at: 0)
+        recentLinks = Array(items.prefix(12))
+        if let data = try? JSONEncoder().encode(recentLinks) {
+            UserDefaults.standard.set(data, forKey: "rw_recent_links")
+        }
     }
 
     private func positionLabel(index: Int, layout: AppGroupLayout) -> String {
@@ -1752,11 +2337,10 @@ struct AppGroupAppIcon: View {
         }
         .frame(width: size, height: size)
         .task(id: path) {
-            guard img == nil else { return }
             let loaded = await Task.detached(priority: .userInitiated) {
                 MacIconImageCache.shared.image(forAppPath: path)
             }.value
-            if let loaded { img = loaded }
+            img = loaded
         }
     }
 }
@@ -2052,7 +2636,7 @@ struct ContentView: View {
                             .frame(width: 7, height: 7)
                         Text(server.lastKnownDeviceName.map { "\($0) · Offline" }
                              ?? "iPhone companion")
-                            .font(.caption)
+                            .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
@@ -2071,42 +2655,50 @@ struct ContentView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
 
-                    // PIN + QR block — collapsible
+                    // Pairing — bento tiles: QR tile + code tile + hint
                     if showPairingPanel {
-                        VStack(spacing: 10) {
-                            Image(nsImage: MacQRCodeImage.make(from: server.pin))
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 96, height: 96)
-                                .padding(8)
-                                .background(Color.white, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                                )
+                        VStack(spacing: 8) {
+                            // QR tile
+                            VStack {
+                                Image(nsImage: MacQRCodeImage.make(from: server.pin))
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 92, height: 92)
+                                    .padding(9)
+                                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .accessibilityLabel("QR code for pairing")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                            Text(server.pin)
-                                .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                                .kerning(4)
+                            // Code tile
+                            VStack(spacing: 2) {
+                                Text(server.pin)
+                                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                                    .kerning(7)
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                                Text("Pairing code")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                            Text("Scan the code or enter this PIN in Rewindpad on your iPhone.")
-                                .font(.caption)
+                            Text("Open Rewindpad on your iPhone and scan, or type the code.")
+                                .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                                 .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 6)
+                                .padding(.top, 4)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 12)
-                        .background(.quaternary.opacity(0.5),
-                                    in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
-                        )
                         .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
+                        .padding(.top, 4)
+                        .padding(.bottom, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
@@ -2226,7 +2818,9 @@ struct BarMacView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Rectangle()
+                .fill(Color.primary.opacity(0.14))
+                .frame(height: 1)
 
             VStack(spacing: 6) {
                 HStack(spacing: 6) {
@@ -3540,91 +4134,75 @@ struct AddRowImage: View {
 
 struct AboutMacView: View {
     @ObservedObject var server: RewindpadServer
+    @State private var activeSupportTopic: SupportTopic? = nil
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 42) {
+            VStack(spacing: 28) {
                 header
-
                 supportSection
-
                 Spacer(minLength: 0)
             }
-            .frame(maxWidth: 760)
+            .frame(maxWidth: 440)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 48)
-            .padding(.top, 58)
-            .padding(.bottom, 44)
+            .padding(.horizontal, 40)
+            .padding(.top, 56)
+            .padding(.bottom, 40)
+        }
+        .sheet(item: $activeSupportTopic) { topic in
+            SupportRequestSheet(topic: topic)
         }
     }
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             RewindpadAboutAppIcon()
-                .frame(width: 108, height: 108)
-                .padding(.bottom, 10)
+                .frame(width: 96, height: 96)
+                .padding(.bottom, 12)
 
             Text("Launchpad")
-                .font(.system(size: 38, weight: .heavy))
-                .tracking(-0.8)
+                .font(.largeTitle.weight(.bold))
 
             Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
-                .font(.callout)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
 
             Text("A faster way to reach your Mac.")
                 .font(.body)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 6)
+                .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
     }
 
     private var supportSection: some View {
-        VStack(spacing: 20) {
-            VStack(spacing: 8) {
-                Text("Get help with Launchpad.")
-                    .font(.system(size: 28, weight: .bold))
-                    .tracking(-0.35)
-                    .multilineTextAlignment(.center)
-
-                Text("Questions, ideas, or something that needs fixing — send it straight from here.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-                    .frame(maxWidth: 520)
-            }
-
-            HStack(spacing: 16) {
-                AboutSupportCard(
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 0) {
+                AboutSupportRow(
                     title: "Help & Support",
-                    systemImage: "questionmark.circle",
-                    action: {
-                        AboutMailHelper.openSupportEmail(subject: "Help & Support — Launchpad")
-                    }
-                )
-
-                AboutSupportCard(
+                    subtitle: "Questions about using Launchpad",
+                    systemImage: "questionmark.circle"
+                ) { activeSupportTopic = .help }
+                Divider().padding(.leading, 48)
+                AboutSupportRow(
                     title: "Feature Request",
-                    systemImage: "sparkles",
-                    action: {
-                        AboutMailHelper.openSupportEmail(subject: "Feature Request — Launchpad")
-                    }
-                )
-
-                AboutSupportCard(
-                    title: "Bug Report",
-                    systemImage: "ladybug",
-                    action: {
-                        AboutMailHelper.openSupportEmail(subject: "Bug Report — Launchpad")
-                    }
-                )
+                    subtitle: "Suggest an idea or improvement",
+                    systemImage: "lightbulb"
+                ) { activeSupportTopic = .feature }
+                Divider().padding(.leading, 48)
+                AboutSupportRow(
+                    title: "Report a Bug",
+                    subtitle: "Something isn't working right",
+                    systemImage: "ant"
+                ) { activeSupportTopic = .bug }
             }
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5)
+            )
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
     }
 }
 
@@ -3651,27 +4229,235 @@ struct RewindpadAboutAppIcon: View {
     }
 }
 
-enum AboutMailHelper {
-    static let email = "safelibrahim@gmail.com"
+/// Native support sender — POSTs the message to the Rewindpad relay endpoint
+/// over HTTPS. Works on any Mac with no mail setup. See SupportRelay/README.md
+/// in the repo for the 5-minute backend deploy.
+enum SupportRelay {
+    static let endpoint = URL(string: "https://rewindpad-support.safelibrahim.workers.dev/send")!
+    static var isConfigured: Bool { !endpoint.absoluteString.contains("YOUR-WORKER") }
+    /// Shared token the worker checks — keeps drive-by spam out.
+    static let token = "rwp_support_v1"
 
-    static func supportURL(subject: String) -> URL {
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = email
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: subject)
+    static func send(topic: String, message: String, replyTo: String = "") async -> Bool {
+        guard isConfigured else { return false }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "X-Rewindpad-Token")
+        let payload: [String: String] = [
+            "topic": topic,
+            "message": message,
+            "replyTo": replyTo,
+            "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
+            "macos": ProcessInfo.processInfo.operatingSystemVersionString
         ]
-
-        return components.url ?? URL(fileURLWithPath: "/")
-    }
-
-    static func openSupportEmail(subject: String) {
-        NSWorkspace.shared.open(supportURL(subject: subject))
+        request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        guard let (_, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return false }
+        return true
     }
 }
 
-struct AboutSupportCard: View {
+enum AboutMailHelper {
+    static let email = "safelibrahim@gmail.com"
+
+    static func supportURL(subject: String, body: String? = nil) -> URL {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = email
+        var items = [URLQueryItem(name: "subject", value: subject)]
+        if let body, !body.isEmpty {
+            items.append(URLQueryItem(name: "body", value: body))
+        }
+        components.queryItems = items
+        return components.url ?? URL(fileURLWithPath: "/")
+    }
+
+    static func openSupportEmail(subject: String, body: String? = nil) {
+        NSWorkspace.shared.open(supportURL(subject: subject, body: body))
+    }
+
+    /// Sends the message directly through Mail via Apple Events — no compose
+    /// window. Returns false when Mail isn't available or automation was
+    /// denied, so the caller can fall back to a mailto: compose draft.
+    static func sendNatively(subject: String, body: String) -> Bool {
+        func escaped(_ s: String) -> String {
+            s.replacingOccurrences(of: "\\", with: "\\\\")
+             .replacingOccurrences(of: "\"", with: "\\\"")
+        }
+        let source = """
+        tell application "Mail"
+            set msg to make new outgoing message with properties {subject:"\(escaped(subject))", content:"\(escaped(body))", visible:false}
+            tell msg to make new to recipient at end of to recipients with properties {address:"\(email)"}
+            send msg
+        end tell
+        """
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else { return false }
+        script.executeAndReturnError(&error)
+        return error == nil
+    }
+}
+
+enum SupportTopic: String, Identifiable, CaseIterable {
+    case help    = "Help & Support"
+    case feature = "Feature Request"
+    case bug     = "Report a Bug"
+
+    var id: String { rawValue }
+
+    var prompt: String {
+        switch self {
+        case .help:    return "What can we help you with?"
+        case .feature: return "What would make Launchpad better for you?"
+        case .bug:     return "What happened, and what did you expect instead?"
+        }
+    }
+}
+
+struct SupportRequestSheet: View {
+    let topic: SupportTopic
+    @Environment(\.dismiss) private var dismiss
+    @State private var message = ""
+    @State private var email = UserDefaults.standard.string(forKey: "rw_support_email") ?? ""
+    @State private var isSending = false
+    @State private var sent = false
+
+    private var emailIsValid: Bool {
+        let t = email.trimmingCharacters(in: .whitespaces)
+        return t.contains("@") && t.contains(".") && t.count >= 6
+    }
+
+    private var canSend: Bool {
+        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && emailIsValid
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if sent {
+                VStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.green)
+                    Text("Message sent")
+                        .font(.title3.weight(.semibold))
+                    Text("Thanks — we'll reply to your email address.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 30)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(topic.rawValue)
+                        .font(.title3.weight(.semibold))
+                    Text(topic.prompt)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Your email")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("name@example.com", text: $email)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14))
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(email.isEmpty || emailIsValid
+                                              ? Color.primary.opacity(0.10)
+                                              : Color.orange.opacity(0.5), lineWidth: 1)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Message")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $message)
+                        .font(.system(size: 14))
+                        .scrollContentBackground(.hidden)
+                        .padding(10)
+                        .frame(height: 140)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                        )
+                }
+
+                Text("We'll reply to the address above.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                        .controlSize(.large)
+                        .keyboardShortcut(.cancelAction)
+                    Button {
+                        send()
+                    } label: {
+                        if isSending {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Sending…")
+                            }
+                        } else {
+                            Text("Send")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canSend || isSending)
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+    }
+
+    private func send() {
+        isSending = true
+        let trimmedEmail = email.trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(trimmedEmail, forKey: "rw_support_email")
+        let subject = "\(topic.rawValue) — Launchpad"
+        let body = "\(message)\n\nFrom: \(trimmedEmail)"
+        Task {
+            // 1. Native HTTPS relay — works on any Mac, no mail setup needed.
+            var ok = await SupportRelay.send(topic: topic.rawValue, message: message, replyTo: trimmedEmail)
+
+            // 2. Fall back to sending through the user's Mail via Apple Events.
+            if !ok {
+                ok = await Task.detached(priority: .userInitiated) {
+                    AboutMailHelper.sendNatively(subject: subject, body: body)
+                }.value
+            }
+
+            isSending = false
+            if ok {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { sent = true }
+                try? await Task.sleep(nanoseconds: 1_400_000_000)
+                dismiss()
+            } else {
+                // 3. Last resort — pre-filled compose draft.
+                AboutMailHelper.openSupportEmail(subject: subject, body: body)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct AboutSupportRow: View {
     let title: String
+    let subtitle: String
     let systemImage: String
     let action: () -> Void
 
@@ -3679,32 +4465,36 @@ struct AboutSupportCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
+                    .font(.system(size: 17))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 26)
 
-                Spacer(minLength: 16)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
 
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .aspectRatio(1, contentMode: .fit)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.primary.opacity(isHovered ? 0.10 : 0.06))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(isHovered ? Color.primary.opacity(0.05) : Color.clear)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .help("Opens your email app")
     }
 }
 

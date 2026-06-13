@@ -105,7 +105,8 @@ struct ScreenCompatibilityChecker {
         layout: AppGroupLayout,
         splitRatio: Double,
         splitRatioSecondary: Double,
-        screen: NSScreen
+        screen: NSScreen,
+        minSize: (AppGroupEntry) -> CGSize? = { AppMinSizeRegistry.minSize(for: $0) }
     ) -> [CompatibilityIssue] {
 
         let slots = apps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }
@@ -157,7 +158,7 @@ struct ScreenCompatibilityChecker {
 
         var issues: [CompatibilityIssue] = []
         for info in slotInfos {
-            guard let minSz = AppMinSizeRegistry.minSize(for: info.entry) else { continue }
+            guard let minSz = minSize(info.entry) else { continue }
             if info.w < minSz.width - 1 {
                 issues.append(CompatibilityIssue(appName: info.entry.appName,
                     slotIndex: info.slotIdx, slotLabel: info.label,

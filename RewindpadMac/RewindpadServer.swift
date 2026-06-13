@@ -541,6 +541,157 @@ struct IconBatchPayload: Codable, Sendable {
 /// Also calls `onDrag` on every resize event so the divider hint overlay can
 /// animate into its active state while the native divider is being dragged.
 /// Observation only — the system divider keeps its fully native behaviour.
+/// Minimal visual cue when a window pins at its minimum size during a
+/// divider drag: a sleek border that snaps tight while a soft glow ring
+/// radiates outward and fades — dramatic at the instant of impact, then gone.
+final class MinSizePinFlash {
+    static let shared = MinSizePinFlash()
+    private var panel: NSPanel?
+
+    /// Glow is drawn into padding around the real window frame, so the panel
+    /// is grown by this amount on each side to give it room to bloom.
+    private let inset: CGFloat = 24
+
+    func flash(cgFrame: CGRect) {
+        // CG global coordinates are flipped relative to the zero-origin
+        // (menu-bar) screen — use THAT screen's height, not just screens.first,
+        // so the rect lands on the window regardless of display arrangement.
+        let primaryH = (NSScreen.screens.first { $0.frame.origin == .zero }
+                        ?? NSScreen.main
+                        ?? NSScreen.screens.first)?.frame.height ?? cgFrame.maxY
+        let window = NSRect(x: cgFrame.minX,
+                            y: primaryH - cgFrame.maxY,
+                            width: cgFrame.width,
+                            height: cgFrame.height)
+        let cocoa = window.insetBy(dx: -inset, dy: -inset)   // room for the bloom
+
+        panel?.orderOut(nil)
+        let p = NSPanel(contentRect: cocoa,
+                        styleMask: [.nonactivatingPanel, .borderless],
+                        backing: .buffered, defer: false)
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.ignoresMouseEvents = true
+        p.hidesOnDeactivate = false
+        p.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let host = NSHostingController(rootView: PinFlashView(inset: inset))
+        if #available(macOS 13.3, *) { host.safeAreaRegions = [] }
+        host.view.frame = NSRect(origin: .zero, size: cocoa.size)
+        p.contentViewController = host
+        p.setFrame(cocoa, display: true)
+        p.alphaValue = 1          // the SwiftUI view runs its own entrance
+        p.orderFrontRegardless()
+        panel = p
+
+        // Brackets clamp + ripples bloom over ~0.45s; let the reticle dwell a
+        // beat, then ease the whole panel out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self, weak p] in
+            guard let p else { return }
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.35
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                p.animator().alphaValue = 0
+            }, completionHandler: {
+                p.orderOut(nil)
+                if self?.panel == p { self?.panel = nil }
+            })
+        }
+    }
+}
+
+/// Four corner brackets (a focus-lock reticle). Drawn at the bounding-box
+/// corners with rounded joins so they read as a precise "locked" frame.
+private struct CornerBrackets: Shape {
+    var armRatio: CGFloat = 0.18
+    var maxArm:   CGFloat = 30
+
+    func path(in rect: CGRect) -> Path {
+        let arm = min(min(rect.width, rect.height) * armRatio, maxArm)
+        var p = Path()
+        // Top-left
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY + arm))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.minX + arm, y: rect.minY))
+        // Top-right
+        p.move(to: CGPoint(x: rect.maxX - arm, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + arm))
+        // Bottom-right
+        p.move(to: CGPoint(x: rect.maxX, y: rect.maxY - arm))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.maxX - arm, y: rect.maxY))
+        // Bottom-left
+        p.move(to: CGPoint(x: rect.minX + arm, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - arm))
+        return p
+    }
+}
+
+/// The animated pin-flash: a focus-lock reticle whose corner brackets spring
+/// inward to "clamp" the window, layered over staggered glow ripples that
+/// radiate outward, and a refined hairline border for definition.
+private struct PinFlashView: View {
+    let inset: CGFloat
+    @State private var clamped = false   // brackets clamp in + border defines
+    @State private var ripple1 = false   // first glow ripple
+    @State private var ripple2 = false   // second, staggered ripple
+
+    private let accent = Color(red: 1.0, green: 0.56, blue: 0.0)
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        ZStack {
+            // Two staggered radiating ripples — blooms of energy at impact.
+            shape
+                .stroke(accent, lineWidth: 2.5)
+                .blur(radius: ripple1 ? 14 : 3)
+                .opacity(ripple1 ? 0 : 0.5)
+                .scaleEffect(ripple1 ? 1.05 : 0.99)
+            shape
+                .stroke(accent.opacity(0.7), lineWidth: 1.5)
+                .blur(radius: ripple2 ? 20 : 2)
+                .opacity(ripple2 ? 0 : 0.35)
+                .scaleEffect(ripple2 ? 1.10 : 1.0)
+
+            // Refined hairline border — quietly defines the boundary.
+            shape
+                .strokeBorder(accent.opacity(clamped ? 0.45 : 0.0), lineWidth: 1.25)
+
+            // Focus-lock corner brackets — spring inward to clamp the window.
+            CornerBrackets()
+                .stroke(
+                    LinearGradient(colors: [accent, accent.opacity(0.55)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                )
+                .scaleEffect(clamped ? 1.0 : 1.07)
+                .opacity(clamped ? 1.0 : 0.0)
+                .shadow(color: accent.opacity(clamped ? 0.0 : 0.7), radius: 7)
+        }
+        .padding(inset)
+        // A borderless panel's hosting view still reports a top safe-area inset
+        // (the title-bar region), which would push the reticle DOWN and leave a
+        // gap above the window. Ignore it so the boundary hugs the real frame.
+        .ignoresSafeArea()
+        .onAppear {
+            // Brackets clamp with a quick overshoot landing on the haptic.
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.5)) {
+                clamped = true
+            }
+            withAnimation(.easeOut(duration: 0.6)) {
+                ripple1 = true
+            }
+            withAnimation(.easeOut(duration: 0.72).delay(0.09)) {
+                ripple2 = true
+            }
+        }
+    }
+}
+
 final class MinSizeWatcher {
 
     private let window:  AXUIElement
@@ -562,7 +713,8 @@ final class MinSizeWatcher {
     }
 
     static func attach(pid: pid_t, window: AXUIElement, minSize: CGSize) -> MinSizeWatcher? {
-        guard minSize.width > 0 || minSize.height > 0 else { return nil }
+        // Attach even with no known minimum — the drag/grab haptics should
+        // work on every window; the min-size pin tick simply won't fire.
         let watcher = MinSizeWatcher(window: window, minSize: minSize)
 
         var obs: AXObserver?
@@ -624,8 +776,10 @@ final class MinSizeWatcher {
                 atLimit = true
                 NSHapticFeedbackManager.defaultPerformer
                     .perform(.levelChange, performanceTime: .now)
+                // Minimal visual cue: pulse an outline around the pinned window.
+                MinSizePinFlash.shared.flash(cgFrame: cgFrame)
             }
-        } else if size.width > minSize.width + 6 && size.height > minSize.height + 6 {
+        } else if atLimit, size.width > minSize.width + 6, size.height > minSize.height + 6 {
             atLimit = false
             hapticAccumulator = 0   // reset on direction change
         }
@@ -3364,8 +3518,69 @@ final class RewindpadServer: ObservableObject {
     }
     // ── End Diagnostic ───────────────────────────────────────────────────────────
 
+    /// Picks split ratios that honor every app's minimum size and distribute
+    /// the remaining space in proportion to each side's needs. A divider the
+    /// user dragged themselves is respected (only clamped into the feasible
+    /// range); the weighting applies when the ratio is still the default.
+    func optimizedRatios(for group: AppGroup, screen: NSScreen) -> (primary: Double, secondary: Double) {
+        let entries = group.apps.filter { !($0.isShortcut && $0.shortcutRunMode == .background) }
+        var r  = group.effectiveSplitRatio
+        var r2 = group.effectiveSplitRatioSecondary
+        guard entries.count >= 2 else { return (r, r2) }
+
+        let b = splitRatioBounds(entries: entries, layout: group.layout, screen: screen)
+        if b.min < b.max {
+            let horizontal: Bool
+            switch group.layout {
+            case .split1x1, .split1x2, .split2x1, .grid2x2: horizontal = true
+            case .split1x1v, .split1x2h:                    horizontal = false
+            }
+            let v = screen.visibleFrame
+            let total = Double(horizontal ? v.width : v.height)
+
+            func need(_ e: AppGroupEntry) -> Double {
+                let s = minSlotSize(for: e)
+                return Double(horizontal ? s.width : s.height)
+            }
+            let mainNeed = need(entries[0])
+            let sideNeed = entries.dropFirst().map(need).max() ?? 0
+
+            if group.splitRatio == nil, mainNeed > 0 || sideNeed > 0, total > 0 {
+                // Untouched divider: give the side column what it needs (plus
+                // a small margin) and hand the primary window everything else
+                // — never letting the primary dip below its own minimum.
+                var target = r
+                if sideNeed > 0 { target = 1 - (sideNeed * 1.08) / total }
+                if mainNeed > 0 { target = max(target, (mainNeed * 1.02) / total) }
+                r = min(max(target, b.min), b.max)
+            } else {
+                // User-set (or unknown needs): just keep it feasible.
+                r = min(max(r, b.min), b.max)
+            }
+        }
+        let b2 = splitRatioBoundsSecondary(entries: entries, layout: group.layout, screen: screen)
+        if b2.min < b2.max { r2 = min(max(r2, b2.min), b2.max) }
+        return (r, r2)
+    }
+
     func launchAppGroup(id: String) {
-        guard let group = appGroups.first(where: { $0.id == id }) else { return }
+        guard var group = appGroups.first(where: { $0.id == id }) else { return }
+
+        // Built for a bigger display? Warn before launching onto a smaller one
+        // (e.g. monitor → MacBook Air) so the user isn't surprised by windows
+        // that can't fit. They can still proceed.
+        if let reason = screenFitProblem(for: group) {
+            guard confirmLaunchDespiteScreenFit(name: group.name, reason: reason) else { return }
+        }
+
+        // Optimize window proportions for this screen before computing frames.
+        let launchScreen = NSScreen.screens.first ?? NSScreen.main!
+        let optimized = optimizedRatios(for: group, screen: launchScreen)
+        if let idx = appGroups.firstIndex(where: { $0.id == id }) {
+            appGroups[idx].splitRatio = optimized.primary
+            appGroups[idx].splitRatioSecondary = optimized.secondary
+            group = appGroups[idx]
+        }
 
         needsAccessibilityPermission = !AXIsProcessTrusted()
         guard !needsAccessibilityPermission else {
@@ -3422,19 +3637,33 @@ final class RewindpadServer: ObservableObject {
         hideOwnNonPanelWindows()
 
         // Cover the launch shuffle (apps opening, windows snapping into place)
-        // with a dark loading shield. When switching scenes the old apps need a
-        // moment to leave first, so extend the shield by the transition delay.
+        // with a dark loading shield. It is dismissed explicitly by the settle
+        // pass once every window has reached its final size; the duration here
+        // is only a safety cap in case an app never produces a window.
         loadingOverlay.show(
             sceneName: group.name,
             icon: group.icon,
             screen: targetScreen,
-            duration: (isSwitching ? 0.6 : 0.0) + 2.0
+            duration: (isSwitching ? 0.6 : 0.0) + 12.0
         )
 
         // Mark this group active immediately so the iPhone tile updates right away
         // (even though the Mac-side launch is slightly deferred when switching).
         activeAppGroups[id] = groupPaths
         activeSlotEntries[id] = slotApps
+
+        // Kill any settle chain surviving from a previous launch of this same
+        // group — its clean ticks would dismiss the fresh loading shield
+        // immediately on relaunch.
+        settleChainTokens[id] = UUID()
+        settleCleanStreak[id] = 0
+
+        // Start watching window sizes early so the loading shield can drop
+        // the moment every window exists at its final size — fast launches
+        // aren't held until the tiling handoff.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (isSwitching ? 0.6 : 0.0) + 2.0) { [weak self] in
+            self?.startSettleChain(groupID: id)
+        }
         broadcastActiveAppGroups()
 
         // Mint a new placement token for this launch. activateAndPlace loops
@@ -3461,7 +3690,15 @@ final class RewindpadServer: ObservableObject {
                 } else if entry.isShortcut, let name = entry.shortcutName {
                     self.runAppleShortcut(name)
                 } else {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
+                    // Launch without activating — the app loads quietly in the
+                    // back and only surfaces when placed into its slot, so the
+                    // launch shuffle doesn't flash windows to the front.
+                    let config = NSWorkspace.OpenConfiguration()
+                    config.activates = false
+                    NSWorkspace.shared.openApplication(
+                        at: URL(fileURLWithPath: entry.path),
+                        configuration: config
+                    )
                 }
             }
             // Background shortcuts — run silently, no window placement.
@@ -3556,9 +3793,23 @@ final class RewindpadServer: ObservableObject {
             // 15 s re-asserting the manual frames and would fight the native
             // tiling, snapping windows back out of the tiled group.
             self.placementTokens.removeValue(forKey: id)
+            // Windows may have refused their assigned sizes (minimum-size
+            // clamping). Re-derive the ratios from what they actually accepted
+            // and re-place, so everything tiles edge-to-edge with no gaps or
+            // overlaps before native tiling takes over.
+            self.startSettleChain(groupID: id)
             // Hand the windows to macOS's native tiling so the system's own
             // draggable divider appears between them.
             self.applyNativeTiling(groupID: id)
+            // First-ever scene: tell the user the windows are resizable.
+            if !UserDefaults.standard.bool(forKey: "rw_resize_hint_shown") {
+                UserDefaults.standard.set(true, forKey: "rw_resize_hint_shown")
+                self.sceneToast.show(
+                    title:   "Windows are resizable",
+                    message: "Hover between two windows and drag the divider.",
+                    screen:  NSScreen.screens.first ?? NSScreen.main!
+                )
+            }
             self.pendingOverlayTasks.removeValue(forKey: id)
             // Showing the panels may cause macOS to resurface our main window briefly.
             // Order it back out immediately so it never appears over the group layout.
@@ -3760,6 +4011,58 @@ final class RewindpadServer: ObservableObject {
         return nil
     }
 
+    /// Checks whether a stored workspace can physically fit the CURRENT screen.
+    /// A workspace built on a large monitor may not fit a smaller built-in
+    /// display (e.g. a MacBook Air). Returns a human reason when it won't fit,
+    /// or nil when it's fine. Uses the best known minimum sizes — no launching.
+    func screenFitProblem(for group: AppGroup) -> String? {
+        let screen = NSScreen.screens.first ?? NSScreen.main!
+        let entries = liveSlotEntries(for: group)
+        guard entries.count >= 2 else { return nil }
+        guard let (a, b) = conflictPair(entries: entries, layout: group.layout, screen: screen) else {
+            return nil   // fits on this screen
+        }
+
+        let v = screen.visibleFrame
+        let horizontal: Bool
+        switch group.layout {
+        case .split1x1, .split1x2, .split2x1, .grid2x2: horizontal = true
+        case .split1x1v, .split1x2h:                    horizontal = false
+        }
+        let dimWord  = horizontal ? "wider" : "taller"
+        let available = Int((horizontal ? v.width : v.height).rounded())
+
+        // What the tighter pair actually needs along the split axis.
+        func need(_ name: String) -> Int {
+            guard let e = entries.first(where: { $0.appName == name }) else { return 0 }
+            let s = minSlotSize(for: e)
+            return Int((horizontal ? s.width : s.height).rounded())
+        }
+        let needA = need(a), needB = need(b)
+        let combined = needA + needB
+
+        var reason = "“\(a)” and “\(b)” need a \(dimWord) window than this display can give them. "
+        if combined > 0 {
+            reason += "Together they need about \(combined) pt, but \(screen.localizedName) only has \(available) pt of usable space. "
+        }
+        reason += "This Workspace was set up for a larger display."
+        return reason
+    }
+
+    /// Blocking warning shown when a workspace won't fit the current screen.
+    /// Returns true if the user chose to launch anyway.
+    private func confirmLaunchDespiteScreenFit(name: String, reason: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "“\(name)” may not fit this screen"
+        alert.informativeText = reason
+        alert.addButton(withTitle: "Launch Anyway")
+        alert.addButton(withTitle: "Cancel")
+        // Make Cancel respond to Escape; Launch Anyway stays the default (Return).
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     private func checkMinSizeConflicts(groupID: String) {
         guard let group = appGroups.first(where: { $0.id == groupID }),
               activeAppGroups[groupID] != nil else { return }
@@ -3788,15 +4091,29 @@ final class RewindpadServer: ObservableObject {
             let minSize = minSlotSize(for: entry)
             if let w = MinSizeWatcher.attach(pid: app.processIdentifier,
                                              window: win, minSize: minSize) {
-                // Animate the divider hint overlay into its active state while
-                // the native macOS divider is being dragged.
+                // Subtle haptic when the user starts dragging the native
+                // divider (debounced so a continuous drag taps only once).
                 w.onDrag = { [weak self] in
-                    self?.dividerManager.notifyDrag(for: groupID)
+                    self?.dividerDragHaptic(for: groupID)
                 }
                 watchers.append(w)
             }
         }
         minSizeWatchers[groupID] = watchers
+    }
+
+    private var lastDividerHaptic: [String: Date] = [:]
+
+    /// One gentle alignment tap when a divider drag begins; re-arms after a
+    /// second of no drag events so a continuous drag doesn't buzz.
+    private func dividerDragHaptic(for groupID: String) {
+        let now = Date()
+        if let last = lastDividerHaptic[groupID], now.timeIntervalSince(last) < 1.0 {
+            lastDividerHaptic[groupID] = now
+            return
+        }
+        lastDividerHaptic[groupID] = now
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
     private func detachMinSizeWatchers(groupID: String) {
@@ -3852,19 +4169,14 @@ final class RewindpadServer: ObservableObject {
             delay += 0.8
         }
 
-        // Once the tiling animations have settled:
-        // 1. Start watching for min-size pins (haptic feedback).
-        // 2. Pulse the divider hint so the user can see exactly where the
-        //    native macOS divider sits before they start dragging it.
+        // Once the tiling animations have settled, start watching for
+        // min-size pins (haptic feedback). The native macOS tiling divider is
+        // the only divider shown — no overlay hint.
         DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.6) { [weak self] in
-            guard let self, let group = self.appGroups.first(where: { $0.id == groupID }),
+            guard let self, self.appGroups.contains(where: { $0.id == groupID }),
                   self.activeAppGroups[groupID] != nil else { return }
             self.attachMinSizeWatchers(groupID: groupID)
             self.checkMinSizeConflicts(groupID: groupID)
-            let screen = NSScreen.screens.first ?? NSScreen.main!
-            let count  = self.liveSlotEntries(for: group).count
-            self.dividerManager.showDividers(for: groupID, group: group,
-                                             screen: screen, slotCount: count)
         }
     }
 
@@ -4046,6 +4358,186 @@ final class RewindpadServer: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             self?.placementTokens.removeValue(forKey: groupID)
             self?.applyNativeTiling(groupID: groupID)
+        }
+    }
+
+    /// Post-launch settle pass: apps clamp windows to their own minimum sizes,
+    /// which can leave a gap on one side and an overlap on the other. Read the
+    /// windows' ACTUAL accepted sizes, re-derive the split ratios from reality,
+    /// and re-place everything so the layout tiles the screen exactly.
+    private var settleChainTokens: [String: UUID] = [:]
+    private var settleCleanStreak: [String: Int] = [:]
+
+    /// Starts (or restarts) the settle chain for a scene. Rotating the token
+    /// kills any previous chain so launches never stack duplicate monitors.
+    func startSettleChain(groupID: String) {
+        let token = UUID()
+        settleChainTokens[groupID] = token
+        settleSceneProportions(groupID: groupID, pass: 0, token: token)
+    }
+
+    private func settleSceneProportions(groupID: String, pass: Int = 0, token: UUID? = nil) {
+        if let token, settleChainTokens[groupID] != token { return }
+        guard let idx = appGroups.firstIndex(where: { $0.id == groupID }),
+              activeAppGroups[groupID] != nil else { return }
+
+        // Never fight the user's own drag — skip this tick entirely.
+        guard NSEvent.pressedMouseButtons == 0 else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.settleSceneProportions(groupID: groupID, pass: pass, token: token)
+            }
+            return
+        }
+        let group = appGroups[idx]
+        let screen = NSScreen.screens.first ?? NSScreen.main!
+        let v = screen.visibleFrame
+        let entries = liveSlotEntries(for: group)
+        guard entries.count >= 2, v.width > 0, v.height > 0 else { return }
+
+        func actualSize(_ entry: AppGroupEntry) -> CGSize? {
+            let running = NSWorkspace.shared.runningApplications
+            let app = running.first { $0.bundleIdentifier == entry.bundleID }
+                ?? running.first { $0.bundleURL?.path == entry.path }
+            guard let app, let win = getAXWindow(for: app) else { return nil }
+            var ref: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(win, kAXSizeAttribute as CFString, &ref) == .success,
+                  let val = ref, CFGetTypeID(val) == AXValueGetTypeID() else { return nil }
+            var size = CGSize.zero
+            AXValueGetValue(val as! AXValue, .cgSize, &size)
+            return size
+        }
+
+        let horizontal: Bool
+        switch group.layout {
+        case .split1x1, .split1x2, .split2x1, .grid2x2: horizontal = true
+        case .split1x1v, .split1x2h:                    horizontal = false
+        }
+        let totalP = Double(horizontal ? v.width : v.height)
+        func primaryAxis(_ s: CGSize) -> Double { Double(horizontal ? s.width : s.height) }
+
+        let assigned = sceneFramesCG(for: group)
+        var changed = false
+
+        // ── Primary divider ─────────────────────────────────────────────
+        // A window that refused its assigned size is sitting at its own
+        // minimum and would overlap its neighbor (or leave a gap). Pick the
+        // ratio that honors whichever window refused.
+        // Windows that drifted from their slot (smaller, or moved) didn't hit
+        // a minimum — they restored their own previous frame (Maps does this
+        // at an unpredictable moment after launch). Push them back into their
+        // slot; the divider must not follow them.
+        var anyDrift = false
+        var allWindowsPresent = true
+        let running = NSWorkspace.shared.runningApplications
+        for (i, entry) in entries.enumerated() where assigned.indices.contains(i) {
+            let app = running.first { $0.bundleIdentifier == entry.bundleID }
+                ?? running.first { $0.bundleURL?.path == entry.path }
+            guard let app, let win = getAXWindow(for: app) else {
+                allWindowsPresent = false
+                continue
+            }
+
+            var posRef: CFTypeRef?, sizeRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(win, kAXPositionAttribute as CFString, &posRef) == .success,
+                  AXUIElementCopyAttributeValue(win, kAXSizeAttribute as CFString, &sizeRef) == .success,
+                  let pv = posRef, CFGetTypeID(pv) == AXValueGetTypeID(),
+                  let sv = sizeRef, CFGetTypeID(sv) == AXValueGetTypeID() else { continue }
+            var pos = CGPoint.zero, size = CGSize.zero
+            AXValueGetValue(pv as! AXValue, .cgPoint, &pos)
+            AXValueGetValue(sv as! AXValue, .cgSize, &size)
+
+            let drifted = abs(pos.x - assigned[i].minX) > 2
+                || abs(pos.y - assigned[i].minY) > 2
+                || primaryAxis(size) < primaryAxis(assigned[i].size) - 2
+            if drifted {
+                anyDrift = true
+                placeWindow(app: app, frame: assigned[i])
+            }
+        }
+
+        // Ratio corrections only happen in the early passes; the long-running
+        // guard below is purely a position/size enforcer.
+        if pass < 3, let s0 = actualSize(entries[0]), assigned.indices.contains(0) {
+            let want0 = primaryAxis(CGSize(width: assigned[0].width, height: assigned[0].height))
+            let got0  = primaryAxis(s0)
+            // Refusal = the window is LARGER than asked (sitting at its min).
+            let primaryRefused = got0 > want0 + 2
+
+            var sideRefused = false
+            var got1: Double = 0
+            if entries.count >= 2, let s1 = actualSize(entries[1]), assigned.indices.contains(1) {
+                let want1 = primaryAxis(CGSize(width: assigned[1].width, height: assigned[1].height))
+                got1 = primaryAxis(s1)
+                sideRefused = got1 > want1 + 2
+            }
+
+            var target: Double? = nil
+            if primaryRefused && sideRefused {
+                // Both at their floors — only feasible if they fit together.
+                if got0 + got1 <= totalP + 2 { target = got0 / totalP }
+            } else if primaryRefused {
+                target = got0 / totalP            // side absorbs the difference
+            } else if sideRefused {
+                target = 1 - (got1 / totalP)      // primary absorbs the difference
+            }
+
+            // Only correct when the seam is meaningfully off (> 8 pt) — small
+            // rounding noise must never trigger another visible resize.
+            if let target, target > 0.05, target < 0.95,
+               abs(target - group.effectiveSplitRatio) * totalP > 8 {
+                appGroups[idx].splitRatio = target
+                changed = true
+            }
+        }
+
+        // ── Secondary divider (stacked side column / bottom row) ────────
+        // Same rule: only follow a window that came out LARGER than asked.
+        if entries.count >= 3, let s1 = actualSize(entries[1]), assigned.indices.contains(1) {
+            let got: Double
+            let want: Double
+            let span: Double
+            switch group.layout {
+            case .split1x2, .split2x1, .grid2x2:
+                got = Double(s1.height); want = Double(assigned[1].height); span = Double(v.height)
+            case .split1x2h:
+                got = Double(s1.width);  want = Double(assigned[1].width);  span = Double(v.width)
+            default:
+                got = 0; want = 0; span = 1
+            }
+            let achieved = got / span
+            if got > want + 2, achieved > 0.05, achieved < 0.95,
+               abs(achieved - group.effectiveSplitRatioSecondary) * span > 8 {
+                appGroups[idx].splitRatioSecondary = achieved
+                changed = true
+            }
+        }
+
+        if changed {
+            // resizeWindowsForGroup compares against the last applied frames
+            // and skips windows whose target didn't move — windows that are
+            // already right keep their size untouched.
+            resizeWindowsForGroup(appGroups[idx])
+        }
+
+        // Drop the launch loading shield only after TWO consecutive clean
+        // checks — one clean read can be a transient state while apps are
+        // still loading. (No-op when the shield is already gone.)
+        if allWindowsPresent && !anyDrift && !changed {
+            settleCleanStreak[groupID, default: 0] += 1
+            if settleCleanStreak[groupID, default: 0] >= 2 {
+                loadingOverlay.dismiss()
+            }
+        } else {
+            settleCleanStreak[groupID] = 0
+        }
+
+        // Guard for the scene's whole lifetime: apps like Maps restore their
+        // previous session's frame at an unpredictable moment after launch.
+        // Each tick is read-only unless a window actually drifted, and the
+        // chain ends itself when the scene stops (the activity guard above).
+        let interval: TimeInterval = pass < 4 ? 1.5 : 3.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + interval) { [weak self] in
+            self?.settleSceneProportions(groupID: groupID, pass: pass + 1, token: token)
         }
     }
 
@@ -4547,6 +5039,105 @@ final class RewindpadServer: ObservableObject {
         UserDefaults.standard.set(raw, forKey: "rw_probed_min_sizes")
     }
 
+    /// Min sizes read non-destructively (AXMinSize) from apps while they were
+    /// running. Lower trust than probed values, but persists so the data is
+    /// available later even when the app isn't running.
+    private var harvestedMinSizes: [String: CGSize] = {
+        guard let raw = UserDefaults.standard.dictionary(forKey: "rw_harvested_min_sizes")
+                as? [String: [Double]] else { return [:] }
+        return raw.compactMapValues {
+            $0.count == 2 ? CGSize(width: $0[0], height: $0[1]) : nil
+        }
+    }()
+
+    private func saveHarvestedMinSizes() {
+        let raw = harvestedMinSizes.mapValues { [Double($0.width), Double($0.height)] }
+        UserDefaults.standard.set(raw, forKey: "rw_harvested_min_sizes")
+    }
+
+    /// Sweeps all running apps and records their AXMinSize without touching
+    /// any window. Cheap and silent — call whenever fresh data helps (e.g.
+    /// when the workspace editor opens). Coverage grows over time as the
+    /// user runs different apps.
+    func harvestMinSizesFromRunningApps() {
+        var changed = false
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            guard let bid = app.bundleIdentifier, !bid.isEmpty,
+                  probedMinSizes[bid] == nil else { continue }
+            let s = minWindowSize(for: app)
+            guard s.width > 40, s.height > 40 else { continue }
+            if let existing = harvestedMinSizes[bid],
+               existing.width >= s.width, existing.height >= s.height { continue }
+            harvestedMinSizes[bid] = CGSize(width: max(s.width, harvestedMinSizes[bid]?.width ?? 0),
+                                            height: max(s.height, harvestedMinSizes[bid]?.height ?? 0))
+            changed = true
+        }
+        if changed { saveHarvestedMinSizes() }
+    }
+
+    /// Whether a running app could join the scene's layout without breaking
+    /// any window's minimum size on the current screen. Non-destructive —
+    /// uses known/AX min sizes, never probes.
+    func canAddToScene(groupID: String, app: NSRunningApplication) -> Bool {
+        guard let group = appGroups.first(where: { $0.id == groupID }),
+              let path = app.bundleURL?.path else { return false }
+        var entries = liveSlotEntries(for: group)
+        guard entries.count < slotCapacity(for: group.layout) else { return false }
+        entries.append(AppGroupEntry(
+            id: UUID().uuidString,
+            appName: app.localizedName ?? "",
+            bundleID: app.bundleIdentifier ?? "",
+            path: path
+        ))
+        let screen = NSScreen.screens.first ?? NSScreen.main!
+        return conflictPair(entries: entries, layout: group.layout, screen: screen) == nil
+    }
+
+    /// Save-time verification: returns a measured minimum size for the entry,
+    /// launching the app (without activating it) when it isn't running and no
+    /// trustworthy data exists yet. Apps we started are quit again afterwards.
+    func measureMinSizeForValidation(entry: AppGroupEntry) async -> CGSize? {
+        guard !entry.isShortcut else { return nil }
+
+        let running = NSWorkspace.shared.runningApplications
+        if let app = running.first(where: { $0.bundleIdentifier == entry.bundleID })
+            ?? running.first(where: { $0.bundleURL?.path == entry.path }) {
+            return probeMinSize(app: app, bundleID: entry.bundleID)
+        }
+
+        // Already know it from a previous probe/harvest/registry? Done.
+        if let known = knownMinSize(bundleID: entry.bundleID) { return known }
+
+        // Unknown and not running — launch quietly, measure, quit.
+        let url = URL(fileURLWithPath: (entry.path as NSString).expandingTildeInPath)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false
+        guard let app = try? await NSWorkspace.shared.openApplication(at: url, configuration: config) else {
+            return nil
+        }
+        var measured: CGSize?
+        for _ in 0..<16 {   // up to ~4 s for the first window to appear
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            if let size = probeMinSize(app: app, bundleID: entry.bundleID) {
+                measured = size
+                break
+            }
+        }
+        app.terminate()
+        return measured
+    }
+
+    /// Best known minimum size for a bundle ID from any source
+    /// (probed → harvested → static registry), or nil if unknown.
+    func knownMinSize(bundleID: String) -> CGSize? {
+        if let p = probedMinSizes[bundleID] { return p }
+        if let h = harvestedMinSizes[bundleID] { return h }
+        if let r = AppMinSizeRegistry.sizes[bundleID] { return r }
+        let lower = bundleID.lowercased()
+        return AppMinSizeRegistry.sizes.first { $0.key.lowercased() == lower }?.value
+    }
+
     /// Measures an app's true minimum window size: ask its window to become
     /// 1×1 via AX and read back what it actually became — AppKit clamps the
     /// request to the window's real contentMinSize, so this is accurate even
@@ -4598,6 +5189,7 @@ final class RewindpadServer: ObservableObject {
     /// missing/lying source can never lower a known floor.
     func minSlotSize(for entry: AppGroupEntry) -> CGSize {
         let registry = AppMinSizeRegistry.minSize(for: entry) ?? .zero
+        let harvested = harvestedMinSizes[entry.bundleID] ?? .zero
 
         let running = NSWorkspace.shared.runningApplications
         let app = running.first { $0.bundleIdentifier == entry.bundleID }
@@ -4610,8 +5202,8 @@ final class RewindpadServer: ObservableObject {
             return CGSize(width:  max(probed.width,  ax.width),
                           height: max(probed.height, ax.height))
         }
-        return CGSize(width:  max(ax.width,  registry.width),
-                      height: max(ax.height, registry.height))
+        return CGSize(width:  max(ax.width,  max(registry.width,  harvested.width)),
+                      height: max(ax.height, max(registry.height, harvested.height)))
     }
 
     func splitRatioBounds(for group: AppGroup, screen: NSScreen) -> (min: Double, max: Double) {
@@ -5203,11 +5795,26 @@ final class RewindpadServer: ObservableObject {
     }
 
     private func runAppleShortcut(_ name: String) {
-        // "Shortcuts Events" is the background-only agent for Shortcuts — it runs
-        // the shortcut silently with no UI, unlike Shortcuts.app or the CLI.
+        // Primary: the shortcuts CLI — runs silently in the background with no
+        // UI and no Apple Events permission prompt.
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+        task.arguments = ["run", name]
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+            return
+        } catch {
+            print("shortcuts CLI failed (\(error)) — falling back to Shortcuts Events")
+        }
+
+        // Fallback: "Shortcuts Events", the background-only Shortcuts agent.
+        // NSAppleScript is NOT thread-safe — it must run on the main thread
+        // (executing it from a background queue fails silently).
         let escaped = name.replacingOccurrences(of: "\"", with: "\\\"")
         let script = "tell application \"Shortcuts Events\" to run shortcut named \"\(escaped)\""
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.main.async {
             var error: NSDictionary?
             NSAppleScript(source: script)?.executeAndReturnError(&error)
             if let err = error {
